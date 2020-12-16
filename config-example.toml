@@ -1,0 +1,12 @@
+[lumina]
+bind_addr = "0.0.0.0:1234"
+use_tls = true
+
+[lumina.tls]
+server_cert = "path/to/server_crt"
+
+[database]
+connection_info = "host=127.0.0.1 port=32768 user=pguser password=pgpasswd"
+use_tls = true
+server_ca = "db_ca.pem"
+client_id = "db_id.p12"

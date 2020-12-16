@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "common",
+    "lumen",
+]
+
+[profile.release]
+panic = "abort"
+lto = "fat"
