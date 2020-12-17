@@ -20,6 +20,9 @@ Pre-built binaries are not distributed at the moment, you will have to build _lu
 5. `cargo +nightly build --release`
 
 ### Usage
+```
+./lumen -c config.toml
+```
 
 ### Configuring IDA
 You will need IDA Pro 7.2 or above in order to use _lumen_.
@@ -57,3 +60,8 @@ openssl x509 -in lumen_crt.pem -out hexrays.crt
 
 No attempt is made to merge function data - this may casuse a situation where metadata is inconsistent.
 Instead, the metadata with the highest calculated score is returned to the user.
+
+
+---
+
+Developed by [Naim A.](https://github.com/naim94a); License: MIT.
