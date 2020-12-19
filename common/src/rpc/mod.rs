@@ -92,6 +92,7 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
 
     let mut data = Vec::new();
     data.try_reserve_exact(buf_len)?;
+    data.resize(buf_len, 0);
     data[0] = code;
     reader.read_exact(&mut data[1..]).await?;
 
