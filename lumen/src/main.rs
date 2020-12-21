@@ -81,7 +81,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
                         error!("pull failed, db: {}", e);
                         rpc::RpcMessage::Fail(rpc::RpcFail {
                             code: 0,
-                            message: "lumen.abad.nl: db error; please try again later."
+                            message: "lumen.abda.nl: db error; please try again later."
                         }).async_write(&mut stream).await?;
                         continue 'server;
                     },

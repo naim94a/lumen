@@ -24,7 +24,7 @@ CREATE UNIQUE INDEX db_paths ON dbs(file_id, user_id, idb_path);
 
 CREATE TABLE funcs (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(1000) NOT NULL,
+    name TEXT NOT NULL,
     len INTEGER NOT NULL,
     db_id INTEGER REFERENCES dbs(id) NOT NULL,
     chksum bytea, /* function chksum */
