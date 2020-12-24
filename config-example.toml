@@ -1,12 +1,26 @@
 [lumina]
+# address that lumen will listen on for IDA to connect to
 bind_addr = "0.0.0.0:1234"
-use_tls = true
+# indicates if TLS should be used for connections, if true the `lumina.tls` section is required.
+use_tls = false
 
+# only required when `use_tls` is set to true.
 [lumina.tls]
+# Specify the server's certificate. 
+# Clients connecting to the server must match this certificate.
+# If the certificate is password protected, the password can be specified in the `PKCSPASSWD` environment variable.
 server_cert = "path/to/server_crt"
 
 [database]
-connection_info = "host=127.0.0.1 port=32768 user=pguser password=pgpasswd"
-use_tls = true
+# Specifies a postgresql connection string. All variables can be found here: https://docs.rs/tokio-postgres/0.6.0/tokio_postgres/config/struct.Config.html
+connection_info = "host=127.0.0.1 port=49153 user=postgres password=1"
+# Sets if the database connection should be made using TLS.
+use_tls = false
+# If the database requires a secure connection, paths to server-ca and client-id certificates can be set here:
 server_ca = "db_ca.pem"
 client_id = "db_id.p12"
+
+# comment out this section to disable api server
+# api server allows to query the database for comments by file or function hash.
+[api_server]
+bind_addr = "0.0.0.0:8082"
