@@ -8,6 +8,7 @@ You can read about the protocol research [here](https://abda.nl/posts/introducin
 ## Features
 - Stores function signatures so you (and your team) can quickly identify functions that you found in the past using IDA's built-in Lumina features.
 - Backed by PostgreSQL
+- Experimental HTTP API that allows querying the database for comments by file or function hash.
 
 ## Getting Started
 ### Running the server
@@ -51,8 +52,8 @@ You may find the following commands useful:
 # create a certificate
 openssl req -x509 -newkey rsa:4096 -keyout lumen_key.pem -out lumen_crt.pem -days 365 -nodes
 
-# convert to pkcs12 for lumen; use for --tls flag
-openssl pkcs12 -export -out animlumenul.p12 -inkey lumen_key.pem -in lumen_crt.pem
+# convert to pkcs12 for lumen; used for `lumen.tls` in config
+openssl pkcs12 -export -out lumen.p12 -inkey lumen_key.pem -in lumen_crt.pem
 
 # export public-key for IDA; Copy hexrays.crt to IDA installation folder
 openssl x509 -in lumen_crt.pem -out hexrays.crt
