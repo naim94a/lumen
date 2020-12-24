@@ -6,24 +6,16 @@
 use native_tls::Identity;
 use clap::{Arg, App};
 use log::*;
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use std::net::SocketAddr;
-use tokio::{net::TcpListener, io::AsyncWrite, io::AsyncRead, sync::RwLock};
+use std::{borrow::Cow, sync::Arc};
+use tokio::{net::TcpListener, io::AsyncWrite, io::AsyncRead};
 use std::process::exit;
-use chrono::Utc;
+use common::{SharedState, SharedState_};
+
+mod web;
 
 use common::{config, db, make_pretty_hex, md, rpc::{self, Error}};
 use common::db::Database;
 use rpc::RpcMessage;
-use common::web::PeerInfo;
-
-pub struct SharedState_ {
-    db: Database,
-    config: Arc<config::Config>,
-    currently_online: RwLock<HashMap<SocketAddr, PeerInfo>>,
-}
-
-type SharedState = Arc<SharedState_>;
 
 fn setup_logger() {
     if std::env::var("RUST_LOG").is_err() {
@@ -153,17 +145,14 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
             }
         };
 
+        let counter = std::sync::atomic::AtomicU32::new(0);
+
         let state = state.clone();
         let accpt = accpt.clone();
         tokio::spawn(async move {
-            let count;
-            {
-                let mut write = state.currently_online.write().await;
-                write.insert(addr, PeerInfo {
-                    connected: Utc::now(),
-                });
-                count = write.len();
-            }
+            let count = {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+            };
             let protocol = if accpt.is_some() {" [TLS]"} else {""};
             debug!("Connection from {:?}{}: {} active connections", &addr, protocol, count);
             match accpt {
@@ -178,12 +167,9 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                 None => handle_connection(&state, client).await,
             }
 
-            let count;
-            {
-                let mut write = state.currently_online.write().await;
-                write.remove(&addr);
-                count = write.len();
-            }
+            let count = {
+                counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1
+            };
             debug!("connection with {:?} ended; {} active connections", addr, count);
         });
     }
@@ -256,7 +242,6 @@ fn main() {
     });
     
     let state = Arc::new(SharedState_{
-        currently_online: RwLock::new(HashMap::new()),
         db,
         config,
     });
@@ -300,6 +285,23 @@ fn main() {
         tls_acceptor = None;
     }
 
+    if let Some(ref webcfg) = state.config.api_server {
+        // workaround until warp supports tokio 0.3
+        let mut rt2 = tokio2::runtime::Builder::new()
+            .enable_all()
+            .threaded_scheduler()
+            .build()
+            .expect("failed to build tokio2 rt");
+        let bind_addr = webcfg.bind_addr;
+        let state = state.clone();
+        info!("starting http api server on {:?}", &bind_addr);
+        std::thread::spawn(move || {
+            rt2.block_on(async move {
+                web::start_webserver(bind_addr, state).await;
+            });
+        });
+    }
+
     let async_server = async {
         let server = match TcpListener::bind(state.config.lumina.bind_addr).await {
             Ok(v) => v,
@@ -311,12 +313,12 @@ fn main() {
 
         info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
     
-        serve(server, tls_acceptor, state).await;
+        serve(server, tls_acceptor, state.clone()).await;
     };
 
     let ctrlc = tokio::signal::ctrl_c();
 
-    let racey = async {
+    let racey = async move {
         tokio::select! {
             _ = async_server => {
                 error!("server decided to quit. this is impossible.");

@@ -16,12 +16,7 @@ pub struct LuminaServer {
 
 #[derive(Deserialize)]
 pub struct WebServer {
-    pub enabled: bool,
     pub bind_addr: SocketAddr,
-    pub secret_key: String,
-
-    pub google_api_client_id: String,
-    pub google_api_secret: String,
 }
 
 #[derive(Deserialize)]
@@ -38,6 +33,16 @@ pub struct Config {
     pub lumina: LuminaServer,
     pub api_server: Option<WebServer>,
     pub database: Database,
+}
+
+pub trait HasConfig {
+    fn get_config(&self) -> &Config;
+}
+
+impl HasConfig for Config {
+    fn get_config(&self) -> &Config {
+        self
+    }
 }
 
 pub fn load_config<R: std::io::Read>(mut fd: R) -> Config {

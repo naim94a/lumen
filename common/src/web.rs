@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc};
+use crate::SharedState;
+use warp::Filter;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct PeerInfo {
-    // on connect
-    pub connected: DateTime<Utc>,
+pub mod api;
+
+pub fn with_state(state: SharedState) -> impl Filter<Extract=(SharedState,), Error= std::convert::Infallible> + Clone {
+    warp::any().map(move || state.clone())
 }

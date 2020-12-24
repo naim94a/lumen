@@ -10,6 +10,13 @@ pub mod md;
 pub mod rpc;
 pub mod web;
 
+pub struct SharedState_ {
+    pub db: db::Database,
+    pub config: std::sync::Arc<config::Config>,
+}
+
+pub type SharedState = std::sync::Arc<SharedState_>;
+
 pub fn make_pretty_hex(data: &[u8]) -> String {
     let mut output = String::new();
     const CHUNK_SIZE: usize = 32;

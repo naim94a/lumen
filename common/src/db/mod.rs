@@ -1,11 +1,14 @@
 use log::*;
 use tokio_postgres::{Client, NoTls};
 use serde::Serialize;
-use std::{cmp::min, collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use crate::config::Config;
+
+pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
+
 pub struct Database {
-    config: Arc<Config>,
+    config: Arc<DynConfig>,
     conn: RwLock<Client>,
     cache: RwLock<HashMap<String, tokio_postgres::Statement>>,
 }
@@ -30,8 +33,8 @@ pub struct DbStats {
 }
 
 impl Database {
-    pub async fn open(config: Arc<Config>) -> Result<Self, tokio_postgres::Error> {
-        let client = Self::connect(&config).await?;
+    pub async fn open(config: Arc<DynConfig>) -> Result<Self, tokio_postgres::Error> {
+        let client = Self::connect(config.get_config()).await?;
 
         Ok(Database{
             config,
@@ -291,7 +294,7 @@ impl Database {
     }
 
     pub async fn reconnect(&self) -> Result<(), tokio_postgres::Error> {
-        let connection = Self::connect(&self.config).await?;
+        let connection = Self::connect(self.config.get_config()).await?;
         
         let conn = &mut *self.conn.write().await;
 
@@ -334,7 +337,6 @@ impl Database {
         LIMIT $2
         OFFSET $3
         "#).await?;
-        let limit = min(limit, 1000);
         let db = self.conn.read().await;
         let rows = db.query(&stmt, &[&md5, &limit, &offset]).await?;
 

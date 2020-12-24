@@ -14,5 +14,6 @@ tokio-postgres = {version = "0.6"}
 postgres-native-tls = "0.4.0"
 native-tls = {version = "0.2"}
 futures-util = "0.3"
-chrono = {version = "0.4", features = ["serde"]}
 toml = "0.5"
+warp = "^0.2.5"
+binascii = "0.1"
