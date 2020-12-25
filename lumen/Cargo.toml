@@ -13,6 +13,6 @@ tokio2 = {package = "tokio", version = "0.2", features = ["full"]}
 log = {version = "0.4", features = ["release_max_level_debug"]}
 pretty_env_logger = "0.4"
 clap = "2.33"
-tokio-native-tls = "0.2"
+tokio-native-tls = "0.3"
 native-tls = {version = "0.2"}
 warp = "^0.2.5"
