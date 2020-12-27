@@ -12,6 +12,7 @@ pub struct LuminaServer {
     pub bind_addr: SocketAddr,
     pub use_tls: Option<bool>,
     pub tls: Option<TlsIdentity>,
+    pub server_name: Option<String>,
 }
 
 #[derive(Deserialize)]
