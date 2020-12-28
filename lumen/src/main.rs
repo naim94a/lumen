@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(unused_crate_dependencies)]
+#![deny(clippy::all)]
 
 use native_tls::Identity;
 use clap::{Arg, App};
