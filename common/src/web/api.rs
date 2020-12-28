@@ -54,7 +54,7 @@ pub fn api_root(state: SharedState) -> impl Filter<Extract = (impl Reply + 'stat
         .and_then(view_func_by_hash);
     let view_status = warp::get()
         .and(warp::path("status"))
-        .and(super::with_state(state.clone()))
+        .and(super::with_state(state))
         .and_then(view_status);
 
     view_file

@@ -76,7 +76,7 @@ impl<'a> FunctionMetadata<'a> {
                 }
             },
         }
-        return true;
+        true
     }
 }
 
@@ -120,7 +120,7 @@ fn deserialize_seq<'de, T: Deserialize<'de>>(mut data: &'de [u8]) -> Result<Vec<
     Ok(res)
 }
 
-pub fn parse_metadata<'a>(mut data: &'a [u8]) -> Result<Vec<FunctionMetadata<'a>>, crate::rpc::Error> {
+pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crate::rpc::Error> {
     let mut res = vec![];
     let mut bad_codes = HashSet::new();
 
@@ -151,7 +151,7 @@ pub fn parse_metadata<'a>(mut data: &'a [u8]) -> Result<Vec<FunctionMetadata<'a>
                     Ok(v) => v,
                     Err(err) => {
                         log::error!("err: {}\n{}", err, super::make_pretty_hex(data));
-                        return Err(err.into());
+                        return Err(err);
                     },
                 };
                 
@@ -171,7 +171,7 @@ pub fn parse_metadata<'a>(mut data: &'a [u8]) -> Result<Vec<FunctionMetadata<'a>
                     Ok(v) => v,
                     Err(err) => {
                         log::error!("err: {}\n{}", err, super::make_pretty_hex(data));
-                        return Err(err.into());
+                        return Err(err);
                     },
                 };
                 
@@ -193,7 +193,7 @@ pub fn parse_metadata<'a>(mut data: &'a [u8]) -> Result<Vec<FunctionMetadata<'a>
     Ok(res)
 }
 
-pub fn get_score<'a>(md: &crate::rpc::PushMetadataFunc) -> u32 {
+pub fn get_score(md: &crate::rpc::PushMetadataFunc) -> u32 {
     let mut score = 0;
 
     let md = match parse_metadata(md.func_data) {
