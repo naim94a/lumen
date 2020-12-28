@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 common = {path = "../common"}
-tokio = {version = "0.3", features = ["full"]}
+tokio = {version = "1.0", features = ["full"]}
 tokio2 = {package = "tokio", version = "0.2", features = ["full"]}
 log = {version = "0.4", features = ["release_max_level_debug"]}
 pretty_env_logger = "0.4"
