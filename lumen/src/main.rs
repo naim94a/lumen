@@ -13,7 +13,7 @@ use common::{SharedState, SharedState_};
 
 mod web;
 
-use common::{config, db, make_pretty_hex, md, rpc::{self, Error}};
+use common::{config, make_pretty_hex, md, rpc::{self, Error}};
 use common::db::Database;
 use rpc::RpcMessage;
 
@@ -25,16 +25,12 @@ fn setup_logger() {
 }
 
 
-async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut stream: S, state: &SharedState) -> Result<(), rpc::Error> {
+async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, mut stream: S) -> Result<(), rpc::Error> {
+    let db = &state.db;
+    let config = state.config.as_ref();
     let hello = rpc::read_packet(&mut stream).await?;
 
-    let config = state.config.clone();
-
-    let server_name = match config.lumina.server_name {
-            Some(ref a) => a,
-            None => "lumen",
-    };
-    
+    let server_name = config.lumina.server_name.as_ref().map_or("lumen", |s| &s);
 
     let hello = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v)) => v,
@@ -42,8 +38,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
             // send error
             error!("got bad hello message");
 
-            let msg = format!("{}: bad sequence.\n", server_name);
-            let resp = rpc::RpcFail{ code: 0, message: &msg };
+            let resp = rpc::RpcFail{ code: 0, message: &format!("{}: bad sequence.\n", server_name) };
             let resp = rpc::RpcMessage::Fail(resp);
             resp.async_write(&mut stream).await?;
 
@@ -54,7 +49,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
     let resp = rpc::RpcMessage::Ok(());
     resp.async_write(&mut stream).await?;
 
-    'server: loop {
+    loop {
         trace!("waiting for command..");
         let req = match rpc::read_packet(&mut stream).await {
             Ok(v) => v,
@@ -67,8 +62,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
             Err(err) => {
                 trace!("bad message: \n{}\n", make_pretty_hex(&req));
                 error!("failed to process rpc message: {}", err);
-                let msg = format!("{}: error: invalid data\n", server_name);
-                let resp = rpc::RpcFail{ code: 0, message: &msg};
+                let resp = rpc::RpcFail{ code: 0, message: &format!("{}: error: invalid data\n", server_name)};
                 let resp = RpcMessage::Fail(resp);
                 resp.async_write(&mut stream).await?;
 
@@ -81,12 +75,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
                     Ok(v) => v,
                     Err(e) => {
                         error!("pull failed, db: {}", e);
-                            let msg = format!("{}:  db error; please try again later..\n", server_name);
                         rpc::RpcMessage::Fail(rpc::RpcFail {
                             code: 0,
-                            message: &msg
+                            message: &format!("{}:  db error; please try again later..\n", server_name)
                         }).async_write(&mut stream).await?;
-                        continue 'server;
+                        continue;
                     },
                 };
 
@@ -120,12 +113,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
                     },
                     Err(err) => {
                         log::error!("push failed, db: {}", err);
-                        let msg = format!("{}: db error; please try again later.", server_name);
                         rpc::RpcMessage::Fail(rpc::RpcFail {
                             code: 0,
-                            message: &msg
+                            message: &format!("{}: db error; please try again later.", server_name)
                         }).async_write(&mut stream).await?;
-                        continue 'server;
+                        continue;
                     }
                 };
 
@@ -134,15 +126,14 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
                 }).async_write(&mut stream).await?;
             },
             _ => {
-                let msg = format!("{}: invalid data\n", server_name);
-                RpcMessage::Fail(rpc::RpcFail{code: 0, message: &msg}).async_write(&mut stream).await?;
+                RpcMessage::Fail(rpc::RpcFail{code: 0, message: &format!("{}: invalid data\n", server_name)}).async_write(&mut stream).await?;
             }
         }
     }
 }
 
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, s: S) {
-    if let Err(err) = handle_client(&state.db, s, &state).await {
+    if let Err(err) = handle_client(&state, s).await {
         warn!("err: {}", err);
     }
 }
