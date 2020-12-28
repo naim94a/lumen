@@ -7,11 +7,11 @@ edition = "2018"
 publish = false
 
 [dependencies]
-tokio = {version = "^0.3.1", features = ["full"]}
+tokio = {version = "1.0", features = ["full"]}
 log = {version = "0.4", features = ["release_max_level_debug"]}
 serde = {version = "1.0", features = ["derive"]}
-tokio-postgres = {version = "0.6"}
-postgres-native-tls = "0.4.0"
+tokio-postgres = {version = "0.7"}
+postgres-native-tls = "0.5"
 native-tls = {version = "0.2"}
 futures-util = "0.3"
 toml = "0.5"
