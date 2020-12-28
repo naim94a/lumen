@@ -15,7 +15,6 @@ mod web;
 
 use common::{config, db, make_pretty_hex, md, rpc::{self, Error}};
 use common::db::Database;
-use common::config::Config;
 use rpc::RpcMessage;
 
 fn setup_logger() {
@@ -26,17 +25,16 @@ fn setup_logger() {
 }
 
 
-async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut stream: S, config: &Config) -> Result<(), rpc::Error> {
+async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut stream: S, state: &SharedState) -> Result<(), rpc::Error> {
     let hello = rpc::read_packet(&mut stream).await?;
 
-    let config = config.clone();
+    let config = state.config.clone();
 
     let server_name = match config.lumina.server_name {
             Some(ref a) => a,
             None => "lumen",
     };
     
-    //let server_name = config.lumina.server_name.as_ref().unwrap_or("lumen".to_string());
 
     let hello = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v)) => v,
@@ -69,7 +67,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
             Err(err) => {
                 trace!("bad message: \n{}\n", make_pretty_hex(&req));
                 error!("failed to process rpc message: {}", err);
-                let resp = rpc::RpcFail{ code: 0, message: "{}: error: invalid data\n" };
+                let msg = format!("{}: error: invalid data\n", server_name);
+                let resp = rpc::RpcFail{ code: 0, message: &msg};
                 let resp = RpcMessage::Fail(resp);
                 resp.async_write(&mut stream).await?;
 
@@ -143,7 +142,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(db: &db::Database, mut
 }
 
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, s: S) {
-    if let Err(err) = handle_client(&state.db, s, &state.config).await {
+    if let Err(err) = handle_client(&state.db, s, &state).await {
         warn!("err: {}", err);
     }
 }
