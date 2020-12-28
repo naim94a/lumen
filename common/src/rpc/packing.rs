@@ -4,7 +4,7 @@ pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
     let bytes = v.to_le_bytes();
     match v {
         0..=0x7f => { // 0..0XXXXXXX (7 bits)
-            if buf.len() < 1 {
+            if buf.is_empty() {
                 return 0;
             }
             buf[0] = bytes[0];
@@ -44,7 +44,7 @@ pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
 
 /// unpacks a dd from `buf`, returning the amount (value, byte consumed)
 pub fn unpack_dd(buf: &[u8]) -> (u32, usize) {
-    if buf.len() < 1 {
+    if buf.is_empty() {
         return (0, 0);
     }
 
@@ -83,7 +83,7 @@ pub fn unpack_dd(buf: &[u8]) -> (u32, usize) {
     val[1] = buf[3];
     val[0] = buf[4];
 
-    return (u32::from_le_bytes(val), 5);
+    (u32::from_le_bytes(val), 5)
 }
 
 #[cfg(test)]

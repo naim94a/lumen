@@ -121,7 +121,7 @@ impl Database {
         }
     }
 
-    pub async fn get_funcs<'a>(&self, funcs: &[crate::rpc::PullMetadataFunc<'a>]) -> Result<Vec<Option<FunctionInfo>>, tokio_postgres::Error> {
+    pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, tokio_postgres::Error> {
         let stmt = self.prepare_cached(r#"
         WITH best AS (
             select chksum,MAX(rank) as maxrank from funcs f1
@@ -134,7 +134,7 @@ impl Database {
 
         let conn = self.conn.read().await;
 
-        let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash.as_ref()).collect();
+        let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
         let rows = conn.query(&stmt, &[&chksums]).await?;
         let mut partial: HashMap<Vec<u8>, FunctionInfo> = rows
@@ -182,7 +182,7 @@ impl Database {
         let hostname = funcs.map(|v| v.hostname);
 
         let row = self.conn.read().await.query(&stmt, &[&lic_id, &hostname, &lic_data]).await?;
-        if row.len() > 0 {
+        if !row.is_empty() {
             let id = row[0].get(0);
             if row.len() > 1 {
                 let vals: Vec<i32> = row.iter().map(|v| v.get(0)).collect();

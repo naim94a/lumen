@@ -158,7 +158,7 @@ impl<'a> RpcMessage<'a> {
 
         let res = match msg_type {
             0x0a => {
-                if payload.len() != 0 {
+                if !payload.is_empty() {
                     trace!("Ok message with additional data: {} bytes", payload.len());
                 }
                 RpcMessage::Ok(())
