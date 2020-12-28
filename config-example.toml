@@ -3,6 +3,8 @@
 bind_addr = "0.0.0.0:1234"
 # indicates if TLS should be used for connections, if true the `lumina.tls` section is required.
 use_tls = false
+# server display name; appears in IDA output window
+server_name = "lumen.example.com"
 
 # only required when `use_tls` is set to true.
 [lumina.tls]
