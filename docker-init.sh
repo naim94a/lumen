@@ -26,7 +26,7 @@ use_default_config(){
 }
 use_default_key(){
     openssl req -x509 -newkey rsa:4096 -keyout /lumen/lumen_key.pem -out /lumen/lumen_crt.pem -days 365 -nodes \
-	    --subj "/C=US/ST=Texas/L=Austin/O=Lumina/OU=Naimd/CN=lumen" -passout "pass:" || die "Generating key"
+	    --subj "/C=US/ST=Texas/L=Austin/O=Lumina/OU=Naimd/CN=lumen" -passout "pass:" -extensions v3_req || die "Generating key"
     openssl pkcs12 -export -out /lumen/lumen.p12 -inkey /lumen/lumen_key.pem -in /lumen/lumen_crt.pem  \
 	    -passin "pass:" -passout "pass:" || die "Exporting key"
     openssl x509 -in /lumen/lumen_crt.pem -out $CFGPATH/hexrays.crt -passin "pass:" || die "Exporting hexrays.crt"

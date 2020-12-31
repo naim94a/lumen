@@ -13,7 +13,9 @@ RUN	cd /lumen && cargo +nightly build --release
 
 FROM	debian:buster-slim
 ARG	DEBIAN_FRONTEND=noninteractive
-RUN	apt-get update && apt-get install -y --no-install-recommends --no-install-suggests openssl netcat-openbsd 
+RUN	apt-get update && apt-get install -y --no-install-recommends --no-install-suggests openssl netcat-openbsd && \
+	sed -i -e 's,\[ v3_req \],\[ v3_req \]\nextendedKeyUsage = serverAuth,' /etc/ssl/openssl.cnf 
 COPY	--from=0	/lumen/target/release/lumen	/usr/bin/lumen
 COPY	config-example.toml	docker-init.sh	/lumen/
+RUN	chmod ug+x /lumen/docker-init.sh && chmod ug+x /usr/bin/lumen
 WORKDIR	/lumen
