@@ -1,6 +1,7 @@
 /target
 Cargo.lock
 private/
+.env
 *.pem
 *.p12
 *.crt
