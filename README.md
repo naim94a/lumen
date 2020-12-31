@@ -19,6 +19,12 @@ Pre-built binaries are not distributed at the moment, you will have to build _lu
 3. `cd lumen`
 4. Setup a Postgres database and execute src/schema.sql on it
 5. `cargo +nightly build --release`
+### Docker Method
+1. Install `docker-engine` and `docker-compose`.
+2. If using a custom TLS certificate, copy the private key (`.p12`/`.pfx` extension) to `./dockershare` and set the key password in `.env` as `PKCSPASSWD`.
+3. If using a custom Lumen config, copy it to `./dockershare/config.toml`.
+4. Otherwise, or if you have finished these steps, just run `docker-compose up`.
+5. Regardless, if TLS is enabled in the `config.toml`, a `hexrays.crt` will be generated in `./dockershare` to be copied to the IDA install directory.
 
 ### Usage
 ```
