@@ -15,5 +15,5 @@ postgres-native-tls = "0.5"
 native-tls = {version = "0.2"}
 futures-util = "0.3"
 toml = "0.5"
-warp = "^0.2.5"
+warp = "^0.3.0"
 binascii = "0.1"
