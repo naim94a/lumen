@@ -291,19 +291,11 @@ fn main() {
     }
 
     if let Some(ref webcfg) = state.config.api_server {
-        // workaround until warp supports tokio 0.3
-        let mut rt2 = tokio2::runtime::Builder::new()
-            .enable_all()
-            .threaded_scheduler()
-            .build()
-            .expect("failed to build tokio2 rt");
         let bind_addr = webcfg.bind_addr;
         let state = state.clone();
         info!("starting http api server on {:?}", &bind_addr);
-        std::thread::spawn(move || {
-            rt2.block_on(async move {
-                web::start_webserver(bind_addr, state).await;
-            });
+        tokio::task::spawn(async move {
+            web::start_webserver(bind_addr, state).await;
         });
     }
 
