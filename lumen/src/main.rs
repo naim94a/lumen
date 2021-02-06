@@ -294,7 +294,7 @@ fn main() {
         let bind_addr = webcfg.bind_addr;
         let state = state.clone();
         info!("starting http api server on {:?}", &bind_addr);
-        tokio::task::spawn(async move {
+        rt.spawn(async move {
             web::start_webserver(bind_addr, state).await;
         });
     }
