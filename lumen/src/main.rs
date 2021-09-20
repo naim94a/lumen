@@ -166,7 +166,7 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                         Ok(s) => {
                             handle_connection(&state, s).await;
                         },
-                        Err(err) => error!("tls accept ({}): {}", &addr, err),
+                        Err(err) => trace!("tls accept ({}): {}", &addr, err),
                     };
                 },
                 None => handle_connection(&state, client).await,

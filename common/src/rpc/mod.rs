@@ -61,8 +61,8 @@ impl From<std::collections::TryReserveError> for Error {
 
 fn get_code_maxlen(code: u8) -> usize {
     match code {
-        0x0e => 10 * 1024 * 1024, // PullMD: 10 MiB
-        0x10 => 60 * 1024 * 1024, // PushMD: 60 MiB
+        0x0e => 50 * 1024 * 1024, // PullMD: 50 MiB
+        0x10 => 200 * 1024 * 1024, // PushMD: 200 MiB
         _ => 1024 * 50, // otherwise 50K
     }
 }

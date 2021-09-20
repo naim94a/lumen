@@ -43,6 +43,10 @@ impl Database {
         })
     }
 
+    pub async fn get_conn(&self) -> tokio::sync::RwLockReadGuard<'_, Client> {
+        self.conn.read().await
+    }
+
     async fn connect_tls(conn_info: &Config) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
         use postgres_native_tls::MakeTlsConnector;
         use native_tls::{TlsConnector, Certificate, Identity};
