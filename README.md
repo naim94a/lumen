@@ -18,7 +18,7 @@ Pre-built binaries are not distributed at the moment, you will have to build _lu
 2. Get a rust toolchain: https://rustup.rs/
 3. `cd lumen`
 4. Setup a Postgres database and execute src/schema.sql on it
-5. `cargo +nightly build --release`
+5. `cargo build --release`
 ### Docker Method
 1. Install `docker-engine` and `docker-compose`.
 2. If using a custom TLS certificate, copy the private key (`.p12`/`.pfx` extension) to `./dockershare` and set the key password in `.env` as `PKCSPASSWD`.
