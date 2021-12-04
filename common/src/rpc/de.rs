@@ -14,7 +14,7 @@ impl<'de> Deserializer<'de> {
     }
     
     fn unpack_dd(&mut self) -> Result<u32, Error> {
-        let (v, len) = super::packing::unpack_dd(&self.input);
+        let (v, len) = super::packing::unpack_dd(self.input);
         if len == 0 {
             Err(Error::UnexpectedEof)
         } else {
