@@ -31,7 +31,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
     let config = state.config.as_ref();
     let hello = rpc::read_packet(&mut stream).await?;
 
-    let server_name = config.lumina.server_name.as_ref().map_or("lumen", |s| &s);
+    let server_name = config.lumina.server_name.as_ref().map_or("lumen", |s| s);
 
     let hello = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v)) => v,
@@ -87,7 +87,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
                 let statuses: Vec<u32> = funcs.iter().map(|v| if v.is_none() { 1 } else {0}).collect();
                 let found = funcs
                     .into_iter()
-                    .filter_map(|v| v)
+                    .flatten()
                     .map(|v| {
                         rpc::PullMetadataResultFunc {
                             popularity: v.popularity,
@@ -134,7 +134,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
 }
 
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, s: S) {
-    if let Err(err) = handle_client(&state, s).await {
+    if let Err(err) = handle_client(state, s).await {
         warn!("err: {}", err);
     }
 }

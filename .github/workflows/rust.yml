@@ -17,7 +17,7 @@ jobs:
     - name: Install latest Rust stable
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
+        toolchain: stable
         override: true
         components: clippy
     - run: rustup component add clippy
@@ -32,7 +32,7 @@ jobs:
     - name: Install latest Rust stable
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
+        toolchain: stable
         override: true
         profile: minimal
     - name: Build

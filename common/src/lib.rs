@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 #![warn(unused_crate_dependencies)]
-#![feature(try_reserve)]
 
 use std::fmt::Write;
 
