@@ -210,8 +210,8 @@ fn main() {
         .about("lumen is a private Lumina server for IDA.\nVisit https://github.com/naim94a/lumen/ for updates.")
         .author("Naim A. <naim@abda.nl>")
         .arg(
-            Arg::with_name("config")
-                .short("c")
+            Arg::new("config")
+                .short('c')
                 .takes_value(true)
                 .required(true)
                 .default_value("config.toml")
