@@ -11,14 +11,16 @@ You can read about the protocol research [here](https://abda.nl/posts/introducin
 - Experimental HTTP API that allows querying the database for comments by file or function hash.
 
 ## Getting Started
-### Running the server
-Pre-built binaries are not distributed at the moment, you will have to build _lumen_ on your own. 
+### Binary releases
+Release binaries are available at https://github.com/naim94a/lumen/releases/latest.
 
+### Building from source with Rust
 1. `git clone https://github.com/naim94a/lumen.git`
 2. Get a rust toolchain: https://rustup.rs/
 3. `cd lumen`
 4. Setup a Postgres database and execute src/schema.sql on it
 5. `cargo build --release`
+
 ### Docker Method
 1. Install `docker-engine` and `docker-compose`.
 2. If using a custom TLS certificate, copy the private key (`.p12`/`.pfx` extension) to `./dockershare` and set the key password in `.env` as `PKCSPASSWD`.
