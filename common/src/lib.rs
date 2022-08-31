@@ -12,6 +12,7 @@ pub mod web;
 pub struct SharedState_ {
     pub db: db::Database,
     pub config: std::sync::Arc<config::Config>,
+    pub server_name: String,
 }
 
 pub type SharedState = std::sync::Arc<SharedState_>;

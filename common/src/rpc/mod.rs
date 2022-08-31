@@ -18,6 +18,8 @@ pub enum Error {
     InvalidData,
     OutOfMemory,
     Todo,
+    Timeout,
+    Eof,
 }
 
 impl std::fmt::Display for Error {
@@ -69,7 +71,11 @@ fn get_code_maxlen(code: u8) -> usize {
 
 pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>, Error> {
     let mut head = [0u8; 5];
-    reader.read_exact(&mut head).await?;
+    match reader.read_exact(&mut head).await {
+        Ok(_) => {},
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(Error::Eof), // client decided to disconnect...
+        Err(e) => return Err(e.into()),
+    }
     let code = head[4];
     let mut buf_len = [0u8; 4];
     buf_len.copy_from_slice(&head[..4]);

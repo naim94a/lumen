@@ -5,5 +5,4 @@ members = [
 ]
 
 [profile.release]
-panic = "abort"
 lto = "fat"

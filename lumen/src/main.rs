@@ -1,12 +1,17 @@
-// Copyright (C) 2020 Naim A. <naim@abda.nl>
+// Copyright (C) 2022 Naim A. <naim@abda.nl>
 
 #![forbid(unsafe_code)]
 #![warn(unused_crate_dependencies)]
 #![deny(clippy::all)]
 
+use common::rpc::{RpcHello, RpcFail};
 use native_tls::Identity;
 use clap::{Arg, App};
 use log::*;
+use tokio::time::timeout;
+use std::mem::discriminant;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 use std::{borrow::Cow, sync::Arc};
 use tokio::{net::TcpListener, io::AsyncWrite, io::AsyncRead};
 use std::process::exit;
@@ -25,13 +30,123 @@ fn setup_logger() {
     pretty_env_logger::init_timed();
 }
 
+async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, user: &'a RpcHello<'a>, mut stream: S) -> Result<(), Error> {
+    let db = &state.db;
+    let server_name = state.server_name.as_str();
+
+    trace!("waiting for command..");
+    let req = match timeout(Duration::from_secs(3600), rpc::read_packet(&mut stream)).await {
+        Ok(res) => match res {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        },
+        Err(_) => {
+            _ = RpcMessage::Fail(RpcFail {
+                code: 0,
+                message: &format!("{server_name} client idle for too long.\n"),
+            }).async_write(&mut stream).await;
+            return Err(Error::Timeout);
+        },
+    };
+    trace!("got command!");
+    let req = match RpcMessage::deserialize(&req) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!("bad message: \n{}\n", make_pretty_hex(&req));
+            error!("failed to process rpc message: {}", err);
+            let resp = rpc::RpcFail{ code: 0, message: &format!("{server_name}: error: invalid data.\n")};
+            let resp = RpcMessage::Fail(resp);
+            resp.async_write(&mut stream).await?;
+
+            return Ok(());
+        },
+    };
+    match req {
+        RpcMessage::PullMetadata(md) => {
+            let start = Instant::now();
+            let funcs = match timeout(Duration::from_secs(60 * 60),  db.get_funcs(&md.funcs)).await {
+                Ok(r) => match r {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("pull failed, db: {}", e);
+                        rpc::RpcMessage::Fail(rpc::RpcFail {
+                            code: 0,
+                            message: &format!("{server_name}:  db error; please try again later..\n")
+                        }).async_write(&mut stream).await?;
+                        return Ok(());
+                    },
+                },
+                Err(_) => {
+                    RpcMessage::Fail(RpcFail {
+                        code: 0,
+                        message: &format!("{server_name}: query took too long to execute.\n"),
+                    }).async_write(&mut stream).await?;
+                    debug!("pull query timeout");
+                    return Err(Error::Timeout);
+                }
+            };
+            debug!("pull {} funcs ended after {:?}", funcs.len(), start.elapsed());
+
+            let statuses: Vec<u32> = funcs.iter().map(|v| if v.is_none() { 1 } else {0}).collect();
+            let found = funcs
+                .into_iter()
+                .flatten()
+                .map(|v| {
+                    rpc::PullMetadataResultFunc {
+                        popularity: v.popularity,
+                        len: v.len,
+                        name: Cow::Owned(v.name),
+                        mb_data: Cow::Owned(v.data),
+                    }
+                }).collect();
+
+            RpcMessage::PullMetadataResult(rpc::PullMetadataResult{
+                unk0: Cow::Owned(statuses),
+                funcs: Cow::Owned(found),
+            }).async_write(&mut stream).await?;
+        },
+        RpcMessage::PushMetadata(mds) => {
+            // parse the function's metadata
+            let start = Instant::now();
+            let scores: Vec<u32> = mds.funcs.iter()
+                .map(md::get_score)
+                .collect();
+
+            let status = match db.push_funcs(user, &mds, &scores).await {
+                Ok(v) => {
+                    v.into_iter().map(|v| if v {1} else {0}).collect::<Vec<u32>>()
+                },
+                Err(err) => {
+                    log::error!("push failed, db: {}", err);
+                    rpc::RpcMessage::Fail(rpc::RpcFail {
+                        code: 0,
+                        message: &format!("{server_name}: db error; please try again later.\n")
+                    }).async_write(&mut stream).await?;
+                    return Ok(());
+                }
+            };
+            debug!("push {} funcs ended after {:?}", status.len(), start.elapsed());
+
+            RpcMessage::PushMetadataResult(rpc::PushMetadataResult {
+                status: Cow::Owned(status),
+            }).async_write(&mut stream).await?;
+        },
+        _ => {
+            RpcMessage::Fail(rpc::RpcFail{code: 0, message: &format!("{server_name}: invalid data.\n")}).async_write(&mut stream).await?;
+        }
+    }
+    Ok(())
+}
 
 async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, mut stream: S) -> Result<(), rpc::Error> {
-    let db = &state.db;
-    let config = state.config.as_ref();
-    let hello = rpc::read_packet(&mut stream).await?;
-
-    let server_name = config.lumina.server_name.as_ref().map_or("lumen", |s| s);
+    let server_name = &state.server_name;
+    let hello = match timeout(Duration::from_secs(15), rpc::read_packet(&mut stream)).await {
+        Ok(v) => v?,
+        Err(_) => {
+            debug!("didn't get hello in time.");
+            return Ok(());
+        },
+    };
 
     let hello = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v)) => v,
@@ -51,96 +166,22 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
     resp.async_write(&mut stream).await?;
 
     loop {
-        trace!("waiting for command..");
-        let req = match rpc::read_packet(&mut stream).await {
-            Ok(v) => v,
-            Err(Error::IOError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
-            Err(e) => return Err(e),
-        };
-        trace!("got command!");
-        let req = match RpcMessage::deserialize(&req) {
-            Ok(v) => v,
-            Err(err) => {
-                trace!("bad message: \n{}\n", make_pretty_hex(&req));
-                error!("failed to process rpc message: {}", err);
-                let resp = rpc::RpcFail{ code: 0, message: &format!("{}: error: invalid data\n", server_name)};
-                let resp = RpcMessage::Fail(resp);
-                resp.async_write(&mut stream).await?;
-
-                return Ok(());
-            },
-        };
-        match req {
-            RpcMessage::PullMetadata(md) => {
-                let funcs = match db.get_funcs(&md.funcs).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        error!("pull failed, db: {}", e);
-                        rpc::RpcMessage::Fail(rpc::RpcFail {
-                            code: 0,
-                            message: &format!("{}:  db error; please try again later..\n", server_name)
-                        }).async_write(&mut stream).await?;
-                        continue;
-                    },
-                };
-
-                let statuses: Vec<u32> = funcs.iter().map(|v| if v.is_none() { 1 } else {0}).collect();
-                let found = funcs
-                    .into_iter()
-                    .flatten()
-                    .map(|v| {
-                        rpc::PullMetadataResultFunc {
-                            popularity: v.popularity,
-                            len: v.len,
-                            name: Cow::Owned(v.name),
-                            mb_data: Cow::Owned(v.data),
-                        }
-                    }).collect();
-
-                RpcMessage::PullMetadataResult(rpc::PullMetadataResult{
-                    unk0: Cow::Owned(statuses),
-                    funcs: Cow::Owned(found),
-                }).async_write(&mut stream).await?;
-            },
-            RpcMessage::PushMetadata(mds) => {
-                // parse the function's metadata
-                let scores: Vec<u32> = mds.funcs.iter()
-                    .map(md::get_score)
-                    .collect();
-
-                let status = match db.push_funcs(&hello, &mds, &scores).await {
-                    Ok(v) => {
-                        v.into_iter().map(|v| if v {1} else {0}).collect::<Vec<u32>>()
-                    },
-                    Err(err) => {
-                        log::error!("push failed, db: {}", err);
-                        rpc::RpcMessage::Fail(rpc::RpcFail {
-                            code: 0,
-                            message: &format!("{}: db error; please try again later.", server_name)
-                        }).async_write(&mut stream).await?;
-                        continue;
-                    }
-                };
-
-                RpcMessage::PushMetadataResult(rpc::PushMetadataResult {
-                    status: Cow::Owned(status),
-                }).async_write(&mut stream).await?;
-            },
-            _ => {
-                RpcMessage::Fail(rpc::RpcFail{code: 0, message: &format!("{}: invalid data\n", server_name)}).async_write(&mut stream).await?;
-            }
-        }
+        handle_transaction(state, &hello, &mut stream).await?;
     }
 }
 
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, s: S) {
     if let Err(err) = handle_client(state, s).await {
-        warn!("err: {}", err);
+        if discriminant(&err) != discriminant(&Error::Eof) {
+            warn!("err: {}", err);
+        }
     }
 }
 
 async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAcceptor>, state: SharedState) {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let accpt = accpt.map(Arc::new);
+
     loop {
         let (client, addr) = match listener.accept().await {
             Ok(v) => v,
@@ -149,33 +190,37 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                 continue;
             }
         };
-
-        let counter = std::sync::atomic::AtomicU32::new(0);
+        let start = Instant::now();
 
         let state = state.clone();
         let accpt = accpt.clone();
         tokio::spawn(async move {
             let count = {
-                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+                COUNTER.fetch_add(1, Ordering::Relaxed) + 1
             };
             let protocol = if accpt.is_some() {" [TLS]"} else {""};
             debug!("Connection from {:?}{}: {} active connections", &addr, protocol, count);
             match accpt {
                 Some(accpt) => {
-                    match accpt.accept(client).await {
-                        Ok(s) => {
-                            handle_connection(&state, s).await;
+                    match timeout(Duration::from_secs(10), accpt.accept(client)).await {
+                        Ok(r) => match r {
+                            Ok(s) => {
+                                handle_connection(&state, s).await;
+                            },
+                            Err(err) => debug!("tls accept ({}): {}", &addr, err),
                         },
-                        Err(err) => trace!("tls accept ({}): {}", &addr, err),
+                        Err(_) => {
+                            debug!("client {} didn't complete ssl handshake in time.", &addr);
+                        },
                     };
                 },
                 None => handle_connection(&state, client).await,
             }
 
             let count = {
-                counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1
+                COUNTER.fetch_sub(1, Ordering::Relaxed) - 1
             };
-            debug!("connection with {:?} ended; {} active connections", addr, count);
+            debug!("connection with {:?} ended after {:?}; {} active connections", addr, start.elapsed(), count);
         });
     }
 }
@@ -245,10 +290,13 @@ fn main() {
             }
         }
     });
-    
+
+    let server_name = config.lumina.server_name.clone().unwrap_or_else(|| String::from("lumen"));
+
     let state = Arc::new(SharedState_{
         db,
         config,
+        server_name,
     });
 
     rt.spawn(maintenance(Arc::downgrade(&state)));
