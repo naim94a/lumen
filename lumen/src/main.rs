@@ -273,6 +273,7 @@ fn main() {
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_stack_size(8 * 1024)
         .build() {
         Ok(v) => v,
         Err(err) => {
