@@ -149,7 +149,10 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
     };
 
     let hello = match RpcMessage::deserialize(&hello) {
-        Ok(RpcMessage::Hello(v)) => v,
+        Ok(RpcMessage::Hello(v, creds)) => {
+            debug!("hello protocol={}, login creds: {creds:?}", v.protocol_version);
+            v
+        },
         _ => {
             // send error
             error!("got bad hello message");
