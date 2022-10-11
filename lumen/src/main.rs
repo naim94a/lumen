@@ -6,7 +6,7 @@
 
 use common::rpc::{RpcHello, RpcFail};
 use native_tls::Identity;
-use clap::{Arg, App};
+use clap::Arg;
 use log::*;
 use tokio::time::timeout;
 use std::mem::discriminant;
@@ -250,14 +250,13 @@ async fn maintenance(state: std::sync::Weak<SharedState_>) {
 
 fn main() {
     setup_logger();
-    let matches = App::new("lumen")
+    let matches = clap::Command::new("lumen")
         .version(env!("CARGO_PKG_VERSION"))
         .about("lumen is a private Lumina server for IDA.\nVisit https://github.com/naim94a/lumen/ for updates.")
         .author("Naim A. <naim@abda.nl>")
         .arg(
             Arg::new("config")
                 .short('c')
-                .takes_value(true)
                 .required(true)
                 .default_value("config.toml")
                 .help("Configuration file path")
@@ -265,7 +264,7 @@ fn main() {
         .get_matches();
 
     let config = {
-        config::load_config(std::fs::File::open(matches.value_of("config").unwrap()).expect("failed to read config"))
+        config::load_config(std::fs::File::open(matches.get_one::<String>("config").unwrap()).expect("failed to read config"))
     };
     let config = Arc::new(config);
 
