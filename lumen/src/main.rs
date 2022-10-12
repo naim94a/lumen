@@ -148,8 +148,11 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
         },
     };
 
-    let hello = match RpcMessage::deserialize(&hello) {
-        Ok(RpcMessage::Hello(v)) => v,
+    let (hello, creds) = match RpcMessage::deserialize(&hello) {
+        Ok(RpcMessage::Hello(v, creds)) => {
+            debug!("hello protocol={}, login creds: {creds:?}", v.protocol_version);
+            (v, creds)
+        },
         _ => {
             // send error
             error!("got bad hello message");
@@ -161,6 +164,17 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
             return Ok(());
         }
     };
+
+    if let Some(ref creds) = creds {
+        if creds.username != "guest" {
+            // Only allow "guest" to connect for now.
+            rpc::RpcMessage::Fail(rpc::RpcFail {
+                code: 1,
+                message: &format!("{server_name}: invalid username or password. Try logging in with `guest` instead."),
+            }).async_write(&mut stream).await?;
+            return Ok(());
+        }
+    }
 
     let resp = rpc::RpcMessage::Ok(());
     resp.async_write(&mut stream).await?;

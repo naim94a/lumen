@@ -117,7 +117,7 @@ pub enum RpcMessage<'a> {
     Ok(()),
     Fail(RpcFail<'a>),
     Notify(RpcNotify<'a>),
-    Hello(RpcHello<'a>),
+    Hello(RpcHello<'a>, Option<Creds<'a>>),
     PullMetadata(PullMetadata<'a>),
     PullMetadataResult(PullMetadataResult<'a>),
     PushMetadata(PushMetadata<'a>),
@@ -138,7 +138,7 @@ impl<'a> serde::Serialize for RpcMessage<'a> {
             RpcMessage::Ok(msg) => tuple.serialize_element(msg)?,
             RpcMessage::Fail(msg) => tuple.serialize_element(msg)?,
             RpcMessage::Notify(msg) => tuple.serialize_element(msg)?,
-            RpcMessage::Hello(msg) => tuple.serialize_element(msg)?,
+            RpcMessage::Hello(msg, _) => tuple.serialize_element(msg)?,
             RpcMessage::PullMetadata(msg) => tuple.serialize_element(msg)?,
             RpcMessage::PullMetadataResult(msg) => tuple.serialize_element(msg)?,
             RpcMessage::PushMetadata(msg) => tuple.serialize_element(msg)?,
@@ -153,7 +153,8 @@ impl<'a> RpcMessage<'a> {
     fn deserialize_check<T: serde::Deserialize<'a>>(payload: &'a [u8]) -> Result<T, Error> {
         let v = de::from_slice(payload)?;
         if v.1 != payload.len() {
-            trace!("{} remaining bytes after deserializing {}", payload.len() - v.1, std::any::type_name::<T>());
+            let bytes_remaining = crate::make_pretty_hex(&payload[v.1..]);
+            trace!("{} remaining bytes after deserializing {}\n{bytes_remaining}", payload.len() - v.1, std::any::type_name::<T>());
         }
         Ok(v.0)
     }
@@ -165,13 +166,29 @@ impl<'a> RpcMessage<'a> {
         let res = match msg_type {
             0x0a => {
                 if !payload.is_empty() {
-                    trace!("Ok message with additional data: {} bytes", payload.len());
+                    trace!("Ok message with additional data: {} bytes: {payload:02x?}", payload.len());
                 }
                 RpcMessage::Ok(())
             },
             0x0b => RpcMessage::Fail(Self::deserialize_check(payload)?),
             0x0c => RpcMessage::Notify(Self::deserialize_check(payload)?),
-            0x0d => RpcMessage::Hello(Self::deserialize_check(payload)?),
+            0x0d => {
+                let (hello, consumed) = de::from_slice::<messages::RpcHello>(payload)?;
+                let creds = if payload.len() > consumed && hello.protocol_version > 2 {
+                    let payload = &payload[consumed..];
+                    let (creds, consumed) = de::from_slice::<Creds>(payload)?;
+                    if payload.len() != consumed {
+                        trace!("bytes remaining after HelloV2: {payload:02x?}");
+                    }
+                    Some(creds)
+                } else {
+                    if hello.protocol_version > 2 || payload.len() != consumed {
+                        trace!("Unexpected Hello msg: {payload:02x?}");
+                    }
+                    None
+                };
+                RpcMessage::Hello(hello, creds)
+            },
             0x0e => RpcMessage::PullMetadata(Self::deserialize_check(payload)?),
             0x0f => RpcMessage::PullMetadataResult(Self::deserialize_check(payload)?),
             0x10 => RpcMessage::PushMetadata(Self::deserialize_check(payload)?),
@@ -201,7 +218,7 @@ impl<'a> RpcMessage<'a> {
             Ok(_) => 0x0a,
             Fail(_) => 0x0b,
             Notify(_) => 0x0c,
-            Hello(_) => 0x0d,
+            Hello(..) => 0x0d,
             PullMetadata(_) => 0x0e,
             PullMetadataResult(_) => 0x0f,
             PushMetadata(_) => 0x10,

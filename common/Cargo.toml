@@ -1,7 +1,7 @@
 [package]
 name = "common"
 description = "common utilities for lumen"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Naim A. <naim@abda.nl>"]
 edition = "2018"
 publish = false

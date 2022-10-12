@@ -13,9 +13,15 @@ pub struct RpcNotify<'a> {
     pub msg: &'a str,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Creds<'a> {
+    pub username: &'a str,
+    pub password: &'a str,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RpcHello<'a> {
-    pub unk0: u32,
+    pub protocol_version: u32,
     pub license_data: &'a [u8],
     pub lic_number: [u8; 6],
     pub unk2: u32,
