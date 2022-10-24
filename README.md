@@ -34,6 +34,30 @@ Release binaries are available at https://github.com/naim94a/lumen/releases/late
 ```
 
 ### Configuring IDA
+
+#### IDA Pro >= 8.1
+If you used LUMEN in the past, remove the LUMINA settings in the ida.cfg or idauser.cfg files, otherwise you will get a warning about
+bad config parameters.
+
+##### Setup under Linux :
+```
+#!/bin/sh
+export LUMINA_TLS=false
+$1
+```
+- save as ida_lumen.sh, "chmod +x ida_lumen.sh", now you can run IDA using "./ida_lumen.sh ./ida" or "./ida_lumen ./ida64"
+
+##### Setup under Windows : 
+```
+set LUMINA_TLS=false
+%1
+```
+- save as ida_lumen.bat, now you can run IDA using "./ida_lumen.bat ida.exe" or "./ida_lumen.bat ida64.exe"
+
+##### Setup IDA
+- Go to Options, General, Lumina. Select "Use a private server", then set your host and port and "guest" as username and password. Click on ok.
+
+#### IDA Pro < 8.1
 You will need IDA Pro 7.2 or above in order to use _lumen_.
 
 > The following information may get sent to _lumen_ server: IDA key, Hostname, IDB path, original file path, file MD5, function signature, stack frames & comments.
