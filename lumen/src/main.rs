@@ -87,7 +87,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
             };
             debug!("pull {} funcs ended after {:?}", funcs.len(), start.elapsed());
 
-            let statuses: Vec<u32> = funcs.iter().map(|v| if v.is_none() { 1 } else {0}).collect();
+            let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();
             let found = funcs
                 .into_iter()
                 .flatten()
@@ -114,7 +114,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
 
             let status = match db.push_funcs(user, &mds, &scores).await {
                 Ok(v) => {
-                    v.into_iter().map(|v| if v {1} else {0}).collect::<Vec<u32>>()
+                    v.into_iter().map(u32::from).collect::<Vec<u32>>()
                 },
                 Err(err) => {
                     log::error!("push failed, db: {}", err);
