@@ -239,29 +239,6 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
     }
 }
 
-async fn maintenance(state: std::sync::Weak<SharedState_>) {
-    let mut timer = tokio::time::interval(std::time::Duration::from_secs(10));
-
-    loop {
-        timer.tick().await;
-
-        if let Some(state) = state.upgrade() {
-            
-            if !state.db.is_online().await {
-                warn!("db is offline; attempting to reconnect...");
-                match state.db.reconnect().await {
-                    Ok(_) => info!("reconnected."),
-                    Err(err) => error!("failed to reconnect: {}", err),
-                }
-            }
-
-        } else {
-            warn!("shared state is not available");
-            break;
-        }
-    }
-}
-
 fn main() {
     setup_logger();
     let matches = clap::Command::new("lumen")
@@ -311,8 +288,6 @@ fn main() {
         config,
         server_name,
     });
-
-    rt.spawn(maintenance(Arc::downgrade(&state)));
 
     let tls_acceptor;
 

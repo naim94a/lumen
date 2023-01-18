@@ -14,7 +14,6 @@ pub enum Error {
     Utf8Error(std::str::Utf8Error),
     IOError(std::io::Error),
     Serde(String),
-    DbError(tokio_postgres::Error),
     InvalidData,
     OutOfMemory,
     Todo,
@@ -47,11 +46,6 @@ impl From<std::io::Error> for Error {
 impl From<std::str::Utf8Error> for Error {
     fn from(v: std::str::Utf8Error) -> Self {
         Error::Utf8Error(v)
-    }
-}
-impl From<tokio_postgres::Error> for Error {
-    fn from(v: tokio_postgres::Error) -> Self {
-        Error::DbError(v)
     }
 }
 impl From<std::collections::TryReserveError> for Error {
