@@ -1,16 +1,14 @@
 use log::*;
-use tokio_postgres::{Client, NoTls};
+use postgres_native_tls::MakeTlsConnector;
+use deadpool_postgres::{tokio_postgres::NoTls, Manager, Pool};
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use std::{collections::HashMap, sync::Arc, str::FromStr};
 use crate::config::Config;
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
 pub struct Database {
-    config: Arc<DynConfig>,
-    conn: RwLock<Client>,
-    cache: RwLock<HashMap<String, tokio_postgres::Statement>>,
+    pool: deadpool_postgres::Pool,
 }
 
 pub struct FunctionInfo {
@@ -33,22 +31,31 @@ pub struct DbStats {
 }
 
 impl Database {
-    pub async fn open(config: Arc<DynConfig>) -> Result<Self, tokio_postgres::Error> {
-        let client = Self::connect(config.get_config()).await?;
+    pub async fn open(config: Arc<DynConfig>) -> Result<Self, deadpool_postgres::tokio_postgres::Error> {
+        let connection_string = config.get_config().database.connection_info.as_str();
+        let pg_config = deadpool_postgres::tokio_postgres::Config::from_str(connection_string)?;
+
+        let mgr_config = deadpool_postgres::ManagerConfig {
+            recycling_method: deadpool_postgres::RecyclingMethod::Verified
+        };
+
+        let manager = if config.get_config().database.use_tls { 
+            let tls = Self::make_tls(config.get_config()).await;
+            Manager::from_config(pg_config, tls, mgr_config)
+        } else {
+            Manager::from_config(pg_config, NoTls, mgr_config)
+        };
+
+        let pool = Pool::builder(manager)
+            .build()
+            .expect("failed to build pool");
 
         Ok(Database{
-            config,
-            conn: RwLock::new(client),
-            cache: RwLock::new(HashMap::new()),
+            pool,
         })
     }
 
-    pub async fn get_conn(&self) -> tokio::sync::RwLockReadGuard<'_, Client> {
-        self.conn.read().await
-    }
-
-    async fn connect_tls(conn_info: &Config) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
-        use postgres_native_tls::MakeTlsConnector;
+    async fn make_tls(conn_info: &Config) -> MakeTlsConnector {
         use native_tls::{TlsConnector, Certificate, Identity};
 
         let mut tls_connector = TlsConnector::builder();
@@ -70,63 +77,13 @@ impl Database {
             .build()
             .expect("failed to build TlsConnector");
 
-        let connector = MakeTlsConnector::new(tls_connector);
-
-        let (client, conn) = tokio_postgres::connect(&conn_info.database.connection_info, connector).await?;
-        info!("database connected (tls).");
-        
-        tokio::spawn(async {
-            if let Err(e) = conn.await {
-                error!("db connection error: {}", e);
-            }
-        });
-
-        Ok(client)
+        MakeTlsConnector::new(tls_connector)
     }
 
-    async fn connect_plain(conn_info: &str) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
-        let (client, conn) = tokio_postgres::connect(conn_info, NoTls).await?;
-        info!("database connected.");
-
-        tokio::spawn(async {
-            if let Err(e) = conn.await {
-                error!("db connection error: {}", e);
-            }
-        });
-
-        Ok(client)
-    }
-
-    async fn connect(conn_info: &Config) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
-        if conn_info.database.use_tls {
-            info!("connecting with TLS...");
-            Self::connect_tls(conn_info).await
-        }
-        else {
-            info!("connecting plain...");
-            Self::connect_plain(&conn_info.database.connection_info).await
-        }
-    }
-
-    async fn prepare_cached<'a, 'b>(&'a self, sql: &'b str) -> Result<tokio_postgres::Statement, tokio_postgres::Error> {
-        {
-            let rd = self.cache.read().await;
-            if let Some(v) = rd.get(sql) {
-                return Ok(v.clone());
-            }
-        }
-        {
-            let stmt = self.conn.read().await.prepare(sql).await?;
-            let mut wr = self.cache.write().await;
-            wr.insert(sql.to_string(), stmt);
-
-            let v = wr.get(sql).expect("failed to get recently added value");
-            Ok(v.clone())
-        }
-    }
-
-    pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(r#"
+    pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn
+            .prepare_cached(r#"
         WITH best AS (
             select chksum,MAX(rank) as maxrank from funcs f1
             WHERE chksum = ANY($1)
@@ -135,8 +92,6 @@ impl Database {
         SELECT f2.name,f2.len,f2.metadata,f2.chksum FROM best
         LEFT JOIN funcs f2 ON (best.chksum=f2.chksum AND best.maxrank=f2.rank)
         "#).await?;
-
-        let conn = self.conn.read().await;
 
         let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
@@ -167,8 +122,9 @@ impl Database {
         Ok(res)
     }
 
-    pub async fn get_or_create_user<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: Option<&'a crate::rpc::PushMetadata<'a>>) -> Result<i32, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(
+    pub async fn get_or_create_user<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: Option<&'a crate::rpc::PushMetadata<'a>>) -> Result<i32, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(
             r#"
             WITH ins AS (
                 INSERT INTO users(lic_id, lic_data, hostname)
@@ -185,7 +141,7 @@ impl Database {
         let lic_data = user.license_data;
         let hostname = funcs.map(|v| v.hostname);
 
-        let row = self.conn.read().await.query(&stmt, &[&lic_id, &hostname, &lic_data]).await?;
+        let row = conn.query(&stmt, &[&lic_id, &hostname, &lic_data]).await?;
         if !row.is_empty() {
             let id = row[0].get(0);
             if row.len() > 1 {
@@ -199,8 +155,9 @@ impl Database {
         }
     }
 
-    async fn get_or_create_file<'a>(&self, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(r#"
+    async fn get_or_create_file<'a>(&self, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         WITH ins AS (
             INSERT INTO files(chksum)
             VALUES ($1)
@@ -214,19 +171,19 @@ impl Database {
 
         let hash = &funcs.md5[..];
 
-        let id: i32 = self.conn.read().await
-            .query_one(&stmt, &[&hash]).await?
+        let id: i32 = conn.query_one(&stmt, &[&hash]).await?
             .get(0);
         Ok(id)
     }
 
-    async fn get_or_create_db<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, tokio_postgres::Error> {
+    async fn get_or_create_db<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, deadpool_postgres::PoolError> {
         let file_id = self.get_or_create_file(funcs);
         let user_id = self.get_or_create_user(user, Some(funcs));
 
         let (file_id, user_id): (i32, i32) = futures_util::try_join!(file_id, user_id)?;
 
-        let stmt = self.prepare_cached(r#"
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         WITH ins AS (
             INSERT INTO dbs (user_id, file_id, file_path, idb_path)
             VALUES ($1, $2, $3, $4)
@@ -242,18 +199,18 @@ impl Database {
         let file_path = funcs.file_path;
 
         trace!("fid={}; uid={}", file_id, user_id);
-        let row = self.conn.read().await
-            .query_one(&stmt, &[&user_id, &file_id, &file_path, &idb_path]).await?;
+        let row = conn.query_one(&stmt, &[&user_id, &file_id, &file_path, &idb_path]).await?;
 
         let db_id = row.get(0);
 
         Ok(db_id)
     }
 
-    pub async fn push_funcs<'a, 'b>(&'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32]) -> Result<Vec<bool>, tokio_postgres::Error> {
+    pub async fn push_funcs<'a, 'b>(&'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32]) -> Result<Vec<bool>, deadpool_postgres::PoolError> {
         let db_id = self.get_or_create_db(user, funcs).await?;
         
-        let stmt = self.prepare_cached(r#"
+        let mut conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         INSERT INTO funcs AS f (name, len, chksum, metadata, db_id, rank)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (db_id,chksum) DO UPDATE 
@@ -268,8 +225,7 @@ impl Database {
 
         // NOTE: Do not access self.conn/prepare_cached before dropping tx - it will deadlock!
         {
-            let mut tx = self.conn.write().await;
-            let tx = tx.transaction().await?;
+            let tx = conn.transaction().await?;
 
             for (func, &score) in funcs.funcs.iter().zip(scores.iter()) {
                 let name = func.name;
@@ -293,23 +249,12 @@ impl Database {
     }
 
     pub async fn is_online(&self) -> bool {
-        let read = self.conn.read().await;
-        !read.is_closed()
+        !self.pool.is_closed()
     }
 
-    pub async fn reconnect(&self) -> Result<(), tokio_postgres::Error> {
-        let connection = Self::connect(self.config.get_config()).await?;
-        
-        let conn = &mut *self.conn.write().await;
-
-        self.cache.write().await.clear();
-
-        *conn = connection;
-        Ok(())
-    }
-
-    pub async fn get_stats(&self) -> Result<DbStats, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(r#"
+    pub async fn get_stats(&self) -> Result<DbStats, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         SELECT 
             (SELECT COUNT(*)::int FROM users) as users,
             (SELECT COUNT(distinct lic_id)::int FROM users) as hosts,
@@ -318,8 +263,7 @@ impl Database {
             (SELECT COUNT(*)::int FROM dbs) as dbs,
             (SELECT COUNT(*)::int FROM files) as files
         "#).await?;
-        let db = self.conn.read().await;
-        let row = db.query_one(&stmt, &[]).await?;
+        let row = conn.query_one(&stmt, &[]).await?;
 
         Ok(DbStats {
             unique_lics: row.try_get(0)?,
@@ -331,8 +275,9 @@ impl Database {
         })
     }
 
-    pub async fn get_file_funcs(&self, md5: &[u8], offset: i64, limit: i64) -> Result<Vec<(String, u32, [u8; 16])>, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(r#"
+    pub async fn get_file_funcs(&self, md5: &[u8], offset: i64, limit: i64) -> Result<Vec<(String, u32, [u8; 16])>, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         SELECT fns.name, fns.len, fns.chksum FROM funcs AS fns
         LEFT JOIN dbs AS d ON (d.id=fns.db_id)
         LEFT JOIN files AS f ON (d.file_id=f.id)
@@ -341,8 +286,7 @@ impl Database {
         LIMIT $2
         OFFSET $3
         "#).await?;
-        let db = self.conn.read().await;
-        let rows = db.query(&stmt, &[&md5, &limit, &offset]).await?;
+        let rows = conn.query(&stmt, &[&md5, &limit, &offset]).await?;
 
         let res = rows.into_iter()
             .map(|row| {
@@ -359,16 +303,16 @@ impl Database {
         Ok(res)
     }
 
-    pub async fn get_files_with_func(&self, func: &[u8]) -> Result<Vec<[u8; 16]>, tokio_postgres::Error> {
-        let stmt = self.prepare_cached(r#"
+    pub async fn get_files_with_func(&self, func: &[u8]) -> Result<Vec<[u8; 16]>, deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached(r#"
         SELECT DISTINCT f.chksum FROM files f
         LEFT JOIN dbs d ON (d.file_id = f.id)
         LEFT JOIN funcs fns ON (fns.db_id = d.id)
         WHERE
             fns.chksum = $1
         "#).await?;
-        let db = self.conn.read().await;
-        let rows = db.query(&stmt, &[&func]).await?;
+        let rows = conn.query(&stmt, &[&func]).await?;
 
         let res = rows
             .into_iter()
