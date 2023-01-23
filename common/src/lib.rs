@@ -8,6 +8,7 @@ pub mod config;
 pub mod md;
 pub mod rpc;
 pub mod web;
+pub mod async_drop;
 
 pub struct SharedState_ {
     pub db: db::Database,

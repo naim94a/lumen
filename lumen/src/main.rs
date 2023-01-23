@@ -4,6 +4,7 @@
 #![warn(unused_crate_dependencies)]
 #![deny(clippy::all)]
 
+use common::async_drop::AsyncDropper;
 use common::rpc::{RpcHello, RpcFail};
 use native_tls::Identity;
 use clap::Arg;
@@ -85,7 +86,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                     return Err(Error::Timeout);
                 }
             };
-            debug!("pull {} funcs ended after {:?}", funcs.len(), start.elapsed());
+            debug!("pull {}/{} funcs ended after {:?}", funcs.len(), md.funcs.len(), start.elapsed());
 
             let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();
             let found = funcs
@@ -196,6 +197,9 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let accpt = accpt.map(Arc::new);
 
+    let (async_drop, worker) = AsyncDropper::new();
+    tokio::task::spawn(worker);
+
     loop {
         let (client, addr) = match listener.accept().await {
             Ok(v) => v,
@@ -208,7 +212,14 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
 
         let state = state.clone();
         let accpt = accpt.clone();
+        let guard = async_drop.defer(async move {
+            let count = {
+                COUNTER.fetch_sub(1, Ordering::Relaxed) - 1
+            };
+            debug!("connection with {:?} ended after {:?}; {} active connections", addr, start.elapsed(), count);
+        });
         tokio::spawn(async move {
+            let _guard = guard;
             let count = {
                 COUNTER.fetch_add(1, Ordering::Relaxed) + 1
             };
@@ -230,11 +241,6 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                 },
                 None => handle_connection(&state, client).await,
             }
-
-            let count = {
-                COUNTER.fetch_sub(1, Ordering::Relaxed) - 1
-            };
-            debug!("connection with {:?} ended after {:?}; {} active connections", addr, start.elapsed(), count);
         });
     }
 }
