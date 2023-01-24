@@ -1,4 +1,5 @@
 use futures_util::{future::BoxFuture, Future};
+use log::trace;
 use tokio::{sync::mpsc::{UnboundedSender, unbounded_channel, WeakUnboundedSender}};
 
 enum AsyncDropperMsg {
@@ -10,7 +11,11 @@ pub struct AsyncDropper {
     tx: UnboundedSender<AsyncDropperMsg>,
 }
 impl AsyncDropper {
+    #[track_caller]
     pub fn new() -> (AsyncDropper, impl Future<Output = ()> + 'static) {
+        let orig = format!("{}", std::panic::Location::caller());
+        trace!("new dropper '{orig}'");
+
         let (tx, mut rx) = unbounded_channel();
         let fut = async move {
             while let Some(msg) = rx.recv().await {
@@ -19,11 +24,12 @@ impl AsyncDropper {
                         fut.await;
                     },
                     AsyncDropperMsg::Termination => {
+                        trace!("term received for '{orig}'...");
                         break;
                     }
                 }
             }
-            log::info!("term received...");
+            trace!("dropper '{orig}' exited.");
         };
 
         (Self { tx }, fut)
@@ -39,7 +45,10 @@ impl AsyncDropper {
 }
 impl Drop for AsyncDropper {
     fn drop(&mut self) {
-        let _ = self.tx.send(AsyncDropperMsg::Termination);
+        if let Err(err) = self.tx.send(AsyncDropperMsg::Termination) {
+            // If this ever panics, we're not cleaning up resources properly.
+            panic!("failed to send termination: {}", err);
+        }
     }
 }
 

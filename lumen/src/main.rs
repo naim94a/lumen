@@ -10,6 +10,7 @@ use native_tls::Identity;
 use clap::Arg;
 use log::*;
 use tokio::time::timeout;
+use std::collections::HashMap;
 use std::mem::discriminant;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -193,32 +194,54 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedStat
     }
 }
 
-async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAcceptor>, state: SharedState) {
+async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAcceptor>, state: SharedState, mut shutdown_signal: tokio::sync::oneshot::Receiver<()>) {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let accpt = accpt.map(Arc::new);
 
     let (async_drop, worker) = AsyncDropper::new();
     tokio::task::spawn(worker);
 
+    let connections = Arc::new(tokio::sync::Mutex::new(HashMap::<std::net::SocketAddr, tokio::task::JoinHandle<()>>::new()));
+
     loop {
-        let (client, addr) = match listener.accept().await {
-            Ok(v) => v,
-            Err(err) => {
-                warn!("failed to accept(): {}", err);
-                continue;
-            }
+        let (client, addr) = tokio::select! {
+            _ = &mut shutdown_signal => {
+                drop(state);
+                info!("shutting down...");
+                let m = connections.lock().await;
+                m.iter().for_each(|(k, v)| {
+                    debug!("aborting task for {k}...");
+                    v.abort();
+                });
+                return;
+             },
+            res = listener.accept() => match res {
+                Ok(v) => v,
+                Err(err) => {
+                    warn!("failed to accept(): {}", err);
+                    continue;
+                }
+            },
         };
+
         let start = Instant::now();
 
         let state = state.clone();
         let accpt = accpt.clone();
+
+        let conns2 = connections.clone();
         let guard = async_drop.defer(async move {
             let count = {
                 COUNTER.fetch_sub(1, Ordering::Relaxed) - 1
             };
             debug!("connection with {:?} ended after {:?}; {} active connections", addr, start.elapsed(), count);
+
+            let mut guard = conns2.lock().await;
+            if guard.remove(&addr).is_none() {
+                error!("Couldn't remove connection from set {addr}");
+            }
         });
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _guard = guard;
             let count = {
                 COUNTER.fetch_add(1, Ordering::Relaxed) + 1
@@ -242,6 +265,9 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                 None => handle_connection(&state, client).await,
             }
         });
+
+        let mut guard = connections.lock().await;
+        guard.insert(addr, handle);
     }
 }
 
@@ -332,16 +358,20 @@ fn main() {
         tls_acceptor = None;
     }
 
-    if let Some(ref webcfg) = state.config.api_server {
+    let web_handle = if let Some(ref webcfg) = state.config.api_server {
         let bind_addr = webcfg.bind_addr;
         let state = state.clone();
         info!("starting http api server on {:?}", &bind_addr);
-        rt.spawn(async move {
+        Some(rt.spawn(async move {
             web::start_webserver(bind_addr, state).await;
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
-    let async_server = async {
+    let (exit_signal_tx, exit_signal_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let async_server = async move {
         let server = match TcpListener::bind(state.config.lumina.bind_addr).await {
             Ok(v) => v,
             Err(err) => {
@@ -352,21 +382,19 @@ fn main() {
 
         info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
     
-        serve(server, tls_acceptor, state.clone()).await;
+        serve(server, tls_acceptor, state, exit_signal_rx).await;
     };
 
-    let ctrlc = tokio::signal::ctrl_c();
-
-    let racey = async move {
-        tokio::select! {
-            _ = async_server => {
-                error!("server decided to quit. this is impossible.");
-            },
-            _ = ctrlc => {
-                info!("process was signaled. Shutting down...");
-            },
+    rt.block_on(async {
+        let server_handle = tokio::task::spawn(async_server);
+        tokio::signal::ctrl_c().await.unwrap();
+        debug!("CTRL-C; exiting...");
+        if let Some(handle) = web_handle {
+            handle.abort();
         }
-    };
-
-    rt.block_on(racey);
+        exit_signal_tx.send(()).unwrap();
+        server_handle.await.unwrap();
+    });
+    drop(rt);
+    info!("Goodbye.");
 }
