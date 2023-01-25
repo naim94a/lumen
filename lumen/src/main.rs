@@ -87,7 +87,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                     return Err(Error::Timeout);
                 }
             };
-            debug!("pull {}/{} funcs ended after {:?}", funcs.len(), md.funcs.len(), start.elapsed());
+            debug!("pull {}/{} funcs ended after {:?}", funcs.iter().filter(|v| v.is_some()).count(), md.funcs.len(), start.elapsed());
 
             let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();
             let found = funcs
