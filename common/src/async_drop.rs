@@ -7,10 +7,13 @@ enum AsyncDropperMsg {
     Termination,
 }
 
+/// Assists with executing code in a future when the future is cancelled.
 pub struct AsyncDropper {
     tx: UnboundedSender<AsyncDropperMsg>,
 }
 impl AsyncDropper {
+    /// Creates a new `AsyncDropper`
+    /// Returns a tuple containing the AsyncDropper struct and a future that will perform tasks when a future is dropped.
     #[track_caller]
     pub fn new() -> (AsyncDropper, impl Future<Output = ()> + 'static) {
         let orig = format!("{}", std::panic::Location::caller());
@@ -35,6 +38,7 @@ impl AsyncDropper {
         (Self { tx }, fut)
     }
 
+    /// Defers execution of a future to when the returned `AsyncDropGuard` is dropped
     pub fn defer<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> AsyncDropGuard {
         let tx = self.tx.downgrade();
         AsyncDropGuard {
@@ -52,12 +56,14 @@ impl Drop for AsyncDropper {
     }
 }
 
+/// A Guard struct. When dropped executes the defered future.
 pub struct AsyncDropGuard {
     tx: WeakUnboundedSender<AsyncDropperMsg>,
     run: Option<BoxFuture<'static, ()>>,
 }
 
 impl AsyncDropGuard {
+    /// This consumes the guard, causing the internal future not to execute.
     pub fn consume(mut self) {
         self.run.take();
     }
