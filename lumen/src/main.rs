@@ -66,7 +66,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
     match req {
         RpcMessage::PullMetadata(md) => {
             let start = Instant::now();
-            let funcs = match timeout(Duration::from_secs(60 * 60),  db.get_funcs(&md.funcs)).await {
+            let funcs = match timeout(Duration::from_secs(4 * 60),  db.get_funcs(&md.funcs)).await {
                 Ok(r) => match r {
                     Ok(v) => v,
                     Err(e) => {
