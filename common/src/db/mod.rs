@@ -3,12 +3,14 @@ use postgres_native_tls::MakeTlsConnector;
 use deadpool_postgres::{tokio_postgres::NoTls, Manager, Pool};
 use serde::Serialize;
 use std::{collections::HashMap, sync::Arc, str::FromStr};
-use crate::config::Config;
+use crate::{config::Config, async_drop::{AsyncDropper, AsyncDropGuard}};
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
 pub struct Database {
+    tls_connector: Option<MakeTlsConnector>,
     pool: deadpool_postgres::Pool,
+    dropper: AsyncDropper,
 }
 
 pub struct FunctionInfo {
@@ -38,11 +40,14 @@ impl Database {
         let mgr_config = deadpool_postgres::ManagerConfig {
             recycling_method: deadpool_postgres::RecyclingMethod::Verified
         };
+        let tls_connector;
 
         let manager = if config.get_config().database.use_tls { 
             let tls = Self::make_tls(config.get_config()).await;
+            tls_connector = Some(tls.clone());
             Manager::from_config(pg_config, tls, mgr_config)
         } else {
+            tls_connector = None;
             Manager::from_config(pg_config, NoTls, mgr_config)
         };
 
@@ -50,8 +55,13 @@ impl Database {
             .build()
             .expect("failed to build pool");
 
+        let (dropper, worker) = AsyncDropper::new();
+        tokio::task::spawn(worker);
+
         Ok(Database{
+            tls_connector,
             pool,
+            dropper,
         })
     }
 
@@ -95,7 +105,10 @@ impl Database {
 
         let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
+        let guard = self.cancel_guard(&conn);
         let rows = conn.query(&stmt, &[&chksums]).await?;
+        guard.consume();
+
         let mut partial: HashMap<Vec<u8>, FunctionInfo> = rows
             .into_iter()
             .map(|row| {
@@ -263,7 +276,10 @@ impl Database {
             (SELECT COUNT(*)::int FROM dbs) as dbs,
             (SELECT COUNT(*)::int FROM files) as files
         "#).await?;
+
+        let guard = self.cancel_guard(&conn);
         let row = conn.query_one(&stmt, &[]).await?;
+        guard.consume();
 
         Ok(DbStats {
             unique_lics: row.try_get(0)?,
@@ -286,7 +302,10 @@ impl Database {
         LIMIT $2
         OFFSET $3
         "#).await?;
+        
+        let guard = self.cancel_guard(&conn);
         let rows = conn.query(&stmt, &[&md5, &limit, &offset]).await?;
+        guard.consume();
 
         let res = rows.into_iter()
             .map(|row| {
@@ -312,7 +331,9 @@ impl Database {
         WHERE
             fns.chksum = $1
         "#).await?;
+        let guard = self.cancel_guard(&conn);
         let rows = conn.query(&stmt, &[&func]).await?;
+        guard.consume();
 
         let res = rows
             .into_iter()
@@ -324,6 +345,20 @@ impl Database {
             })
             .collect();
         Ok(res)
+    }
+
+    fn cancel_guard(&self, conn: &deadpool_postgres::Object) -> AsyncDropGuard {
+        let token = conn.cancel_token();
+        let tls_connector = self.tls_connector.clone();
+        self.dropper.defer(async move {
+            debug!("cancelling query...");
+
+            if let Some(tls) = tls_connector {
+                let _ = token.cancel_query(tls).await;
+            } else {
+                let _ = token.cancel_query(NoTls).await;
+            }
+        })
     }
 
     pub async fn delete_metadata(&self, req: &crate::rpc::DelHistory<'_>) -> Result<(), deadpool_postgres::PoolError> {
