@@ -8,6 +8,7 @@ use crate::{config::Config, async_drop::{AsyncDropper, AsyncDropGuard}};
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
 pub struct Database {
+    tls_connector: Option<MakeTlsConnector>,
     pool: deadpool_postgres::Pool,
     dropper: AsyncDropper,
 }
@@ -39,11 +40,14 @@ impl Database {
         let mgr_config = deadpool_postgres::ManagerConfig {
             recycling_method: deadpool_postgres::RecyclingMethod::Verified
         };
+        let tls_connector;
 
         let manager = if config.get_config().database.use_tls { 
             let tls = Self::make_tls(config.get_config()).await;
+            tls_connector = Some(tls.clone());
             Manager::from_config(pg_config, tls, mgr_config)
         } else {
+            tls_connector = None;
             Manager::from_config(pg_config, NoTls, mgr_config)
         };
 
@@ -55,6 +59,7 @@ impl Database {
         tokio::task::spawn(worker);
 
         Ok(Database{
+            tls_connector,
             pool,
             dropper,
         })
@@ -344,11 +349,15 @@ impl Database {
 
     fn cancel_guard(&self, conn: &deadpool_postgres::Object) -> AsyncDropGuard {
         let token = conn.cancel_token();
+        let tls_connector = self.tls_connector.clone();
         self.dropper.defer(async move {
             debug!("cancelling query...");
 
-            // TODO: support TLS
-            let _ = token.cancel_query(NoTls).await;
+            if let Some(tls) = tls_connector {
+                let _ = token.cancel_query(tls).await;
+            } else {
+                let _ = token.cancel_query(NoTls).await;
+            }
         })
     }
 
