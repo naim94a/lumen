@@ -22,7 +22,7 @@ pub fn make_pretty_hex(data: &[u8]) -> String {
     const CHUNK_SIZE: usize = 32;
     data.chunks(CHUNK_SIZE).for_each(|chunk| {
         for &ch in chunk {
-            let _ = write!(&mut output, "{:02x} ", ch);
+            let _ = write!(&mut output, "{ch:02x} ");
         }
         let padding = CHUNK_SIZE - chunk.len();
         for _ in 0..padding {

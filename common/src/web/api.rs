@@ -219,7 +219,7 @@ async fn view_status(state: SharedState) -> Result<impl Reply, Rejection> {
 
     let stats = match state.db.get_stats().await {
         Ok(stats) => DbStatus::Stats(stats),
-        Err(err) => DbStatus::Error(format!("{}", err)),
+        Err(err) => DbStatus::Error(format!("{err}")),
     };
 
     Result::<_, Rejection>::Ok(warp::reply::json(&Response {
