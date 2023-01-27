@@ -351,4 +351,19 @@ impl Database {
             let _ = token.cancel_query(NoTls).await;
         })
     }
+
+    pub async fn delete_metadata(&self, req: &crate::rpc::DelHistory<'_>) -> Result<(), deadpool_postgres::PoolError> {
+        let conn = self.pool.get().await?;
+        let stmt = conn.prepare_cached("DELETE FROM funcs WHERE chksum = ANY($1)").await?;
+
+        let chksums = req.funcs.iter()
+            .map(|v| v.as_slice())
+            .collect::<Vec<_>>();
+        
+        conn.execute(&stmt, &[
+            &chksums
+        ]).await?;
+
+        Ok(())
+    }
 }

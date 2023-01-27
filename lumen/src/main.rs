@@ -133,6 +133,27 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                 status: Cow::Owned(status),
             }).async_write(&mut stream).await?;
         },
+        RpcMessage::DelHistory(req) => {
+            let is_delete_allowed = state.config.lumina.allow_deletes.unwrap_or(false);
+            if !is_delete_allowed {
+                RpcMessage::Fail(rpc::RpcFail {
+                    code: 2,
+                    message: &format!("{server_name}: Delete command is disabled on this server.")
+                }).async_write(&mut stream).await?;
+            } else {
+                if let Err(err) = db.delete_metadata(&req).await {
+                    error!("delete failed. db: {err}");
+                    RpcMessage::Fail(rpc::RpcFail {
+                        code: 3,
+                        message: &format!("{server_name}: db error, please try again later.")
+                    }).async_write(&mut stream).await?;
+                    return Ok(());
+                }
+                RpcMessage::DelHistoryResult(rpc::DelHistoryResult {
+                    deleted_mds: req.funcs.len() as u32,
+                }).async_write(&mut stream).await?;
+            }
+        },
         _ => {
             RpcMessage::Fail(rpc::RpcFail{code: 0, message: &format!("{server_name}: invalid data.\n")}).async_write(&mut stream).await?;
         }
@@ -159,7 +180,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
             // send error
             error!("got bad hello message");
 
-            let resp = rpc::RpcFail{ code: 0, message: &format!("{}: bad sequence.\n", server_name) };
+            let resp = rpc::RpcFail{ code: 0, message: &format!("{server_name}: bad sequence.") };
             let resp = rpc::RpcMessage::Fail(resp);
             resp.async_write(&mut stream).await?;
 

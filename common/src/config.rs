@@ -13,6 +13,7 @@ pub struct LuminaServer {
     pub use_tls: Option<bool>,
     pub tls: Option<TlsIdentity>,
     pub server_name: Option<String>,
+    pub allow_deletes: Option<bool>,
 }
 
 #[derive(Deserialize)]
