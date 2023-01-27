@@ -178,7 +178,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
             // send error
             error!("got bad hello message");
 
-            let resp = rpc::RpcFail{ code: 0, message: &format!("{}: bad sequence.\n", server_name) };
+            let resp = rpc::RpcFail{ code: 0, message: &format!("{server_name}: bad sequence.") };
             let resp = rpc::RpcMessage::Fail(resp);
             resp.async_write(&mut stream).await?;
 
