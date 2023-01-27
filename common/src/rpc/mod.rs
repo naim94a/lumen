@@ -116,6 +116,8 @@ pub enum RpcMessage<'a> {
     PullMetadataResult(PullMetadataResult<'a>),
     PushMetadata(PushMetadata<'a>),
     PushMetadataResult(PushMetadataResult<'a>),
+    DelHistory(DelHistory<'a>),
+    DelHistoryResult(DelHistoryResult),
 }
 
 impl<'a> serde::Serialize for RpcMessage<'a> {
@@ -137,6 +139,8 @@ impl<'a> serde::Serialize for RpcMessage<'a> {
             RpcMessage::PullMetadataResult(msg) => tuple.serialize_element(msg)?,
             RpcMessage::PushMetadata(msg) => tuple.serialize_element(msg)?,
             RpcMessage::PushMetadataResult(msg) => tuple.serialize_element(msg)?,
+            RpcMessage::DelHistory(msg) => tuple.serialize_element(msg)?,
+            RpcMessage::DelHistoryResult(msg) => tuple.serialize_element(msg)?,
         }
 
         tuple.end()
@@ -187,6 +191,8 @@ impl<'a> RpcMessage<'a> {
             0x0f => RpcMessage::PullMetadataResult(Self::deserialize_check(payload)?),
             0x10 => RpcMessage::PushMetadata(Self::deserialize_check(payload)?),
             0x11 => RpcMessage::PushMetadataResult(Self::deserialize_check(payload)?),
+            0x18 => RpcMessage::DelHistory(Self::deserialize_check(payload)?),
+            0x19 => RpcMessage::DelHistoryResult(Self::deserialize_check(payload)?),
             _ => {
                 trace!("got invalid message type '{:02x}'", msg_type);
                 return Err(Error::InvalidData);
@@ -217,6 +223,8 @@ impl<'a> RpcMessage<'a> {
             PullMetadataResult(_) => 0x0f,
             PushMetadata(_) => 0x10,
             PushMetadataResult(_) => 0x11,
+            DelHistory(_) => 0x18,
+            DelHistoryResult(_) => 0x19,
         }
     }
 }

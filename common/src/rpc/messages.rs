@@ -84,3 +84,24 @@ pub struct PushMetadataResult<'a> {
     // array of 0=exists, 1=NEW
     pub status: Cow<'a, [u32]>,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DelHistory<'a> {
+    pub unk0: u32, // =0x08
+    pub unk1: Cow<'a, [Cow<'a, str>]>,
+    pub unk2: Cow<'a, [[u64; 2]]>,
+    pub unk3: Cow<'a, [[u64; 2]]>,
+    pub unk4: Cow<'a, [Cow<'a, str>]>,
+    pub unk5: Cow<'a, [Cow<'a, str>]>,
+    pub unk6: Cow<'a, [Cow<'a, str>]>,
+    pub unk7: Cow<'a, [Cow<'a, str>]>,
+    pub unk8: Cow<'a, [Cow<'a, [u8; 16]>]>,
+    pub funcs: Cow<'a, [Cow<'a, [u8; 16]>]>,
+    pub unk10: Cow<'a, [[u64; 2]]>,
+    pub unk11: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DelHistoryResult {
+    pub deleted_mds: u32,
+}

@@ -6,6 +6,9 @@ use_tls = false
 # server display name; appears in IDA output window
 server_name = "lumen"
 
+# Allow clients to delete metadata from the database?
+allow_deletes = false
+
 # only required when `use_tls` is set to true.
 [lumina.tls]
 # Specify the server's certificate. 
