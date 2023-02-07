@@ -325,7 +325,7 @@ fn main() {
     };
     
     let db = rt.block_on(async {
-        match Database::open(config.clone()).await {
+        match Database::open(&config.database).await {
             Ok(v) => v,
             Err(err) => {
                 error!("failed to open database: {}", err);

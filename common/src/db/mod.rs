@@ -1,15 +1,21 @@
 use log::*;
 use postgres_native_tls::MakeTlsConnector;
-use deadpool_postgres::{tokio_postgres::NoTls, Manager, Pool};
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc, str::FromStr};
-use crate::{config::Config, async_drop::{AsyncDropper, AsyncDropGuard}};
+use tokio_postgres::{tls::MakeTlsConnect, Socket, CancelToken, NoTls};
+use std::collections::HashMap;
+use crate::async_drop::{AsyncDropper, AsyncDropGuard};
+mod schema_auto;
+pub mod schema;
+pub mod models;
+
+use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods};
+use diesel_async::RunQueryDsl;
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
 pub struct Database {
     tls_connector: Option<MakeTlsConnector>,
-    pool: deadpool_postgres::Pool,
+    diesel: diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection>,
     dropper: AsyncDropper,
 }
 
@@ -33,50 +39,77 @@ pub struct DbStats {
 }
 
 impl Database {
-    pub async fn open(config: Arc<DynConfig>) -> Result<Self, deadpool_postgres::tokio_postgres::Error> {
-        let connection_string = config.get_config().database.connection_info.as_str();
-        let pg_config = deadpool_postgres::tokio_postgres::Config::from_str(connection_string)?;
-
-        let mgr_config = deadpool_postgres::ManagerConfig {
-            recycling_method: deadpool_postgres::RecyclingMethod::Verified
-        };
-        let tls_connector;
-
-        let manager = if config.get_config().database.use_tls { 
-            let tls = Self::make_tls(config.get_config()).await;
-            tls_connector = Some(tls.clone());
-            Manager::from_config(pg_config, tls, mgr_config)
+    pub async fn open(config: &crate::config::Database) -> Result<Self, anyhow::Error> {
+        let connection_string = config.connection_info.as_str();
+        let tls_connector = if config.use_tls {
+            Some(Self::make_tls(config).await)
         } else {
-            tls_connector = None;
-            Manager::from_config(pg_config, NoTls, mgr_config)
+            None
         };
-
-        let pool = Pool::builder(manager)
-            .build()
-            .expect("failed to build pool");
 
         let (dropper, worker) = AsyncDropper::new();
         tokio::task::spawn(worker);
 
+        let diesel =  Self::make_bb8_pool(connection_string, tls_connector.clone()).await;
+
         Ok(Database{
             tls_connector,
-            pool,
             dropper,
+            diesel,
         })
     }
 
-    async fn make_tls(conn_info: &Config) -> MakeTlsConnector {
+    async fn make_pg_client<T>(db_url: &str, tls: T) -> diesel::result::ConnectionResult<diesel_async::AsyncPgConnection>
+        where T: MakeTlsConnect<Socket>,
+        T::Stream: Send + 'static {
+        let (cli, conn) = tokio_postgres::connect(db_url, tls)
+            .await
+            .map_err(|e| {
+                error!("failed to connect db: {e}");
+                diesel::result::ConnectionError::BadConnection(format!("{e}"))
+            })?;
+
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                error!("connection task error: {e}");
+            }
+        });
+
+        diesel_async::AsyncPgConnection::try_from(cli).await
+    }
+
+    async fn make_bb8_pool(db_url: &str, tls: Option<MakeTlsConnector>) -> diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection> {
+        let cfg = diesel_async::pooled_connection::AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new_with_setup(db_url, move |db_url| {
+            let tls = tls.clone();
+            Box::pin( async move {
+                if let Some(tls) = tls {
+                    Self::make_pg_client(db_url, tls).await
+                } else {
+                    Self::make_pg_client(db_url, NoTls).await
+                }
+            })
+        });
+
+        let pool = diesel_async::pooled_connection::bb8::Pool::builder()
+            .min_idle(Some(1))
+            .build(cfg)
+                .await
+                .unwrap();
+        pool
+    }
+
+    async fn make_tls(database: &crate::config::Database) -> MakeTlsConnector {
         use native_tls::{TlsConnector, Certificate, Identity};
 
         let mut tls_connector = TlsConnector::builder();
 
-        if let Some(ref client_identity) = conn_info.database.client_id {
+        if let Some(ref client_identity) = database.client_id {
             let client_identity = tokio::fs::read(client_identity).await.expect("failed to read db's client id");
             let client_identity = Identity::from_pkcs12(&client_identity, "").expect("failed to load db's client identity (PKCS12)");
             tls_connector.identity(client_identity);
         }
 
-        if let Some(ref server_ca) = conn_info.database.server_ca {
+        if let Some(ref server_ca) = database.server_ca {
             let server_ca = tokio::fs::read(server_ca).await.expect("failed to read db's server ca");
             let server_ca = Certificate::from_pem(&server_ca).expect("failed to load db's server ca (PEM)");
             tls_connector.add_root_certificate(server_ca);
@@ -90,37 +123,34 @@ impl Database {
         MakeTlsConnector::new(tls_connector)
     }
 
-    pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn
-            .prepare_cached(r#"
-        WITH best AS (
-            select chksum,MAX(rank) as maxrank from funcs f1
-            WHERE chksum = ANY($1)
-            GROUP BY chksum 
-        )
-        SELECT f2.name,f2.len,f2.metadata,f2.chksum FROM best
-        LEFT JOIN funcs f2 ON (best.chksum=f2.chksum AND best.maxrank=f2.rank)
-        "#).await?;
-
+    pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, anyhow::Error> {
         let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
-        let guard = self.cancel_guard(&conn);
-        let rows = conn.query(&stmt, &[&chksums]).await?;
-        guard.consume();
+        let rows = {
+            use schema::func_ranks::{table as func_ranks, name, len, metadata, chksum};
+
+            let mut conn = self.diesel.get().await?;
+            let ct = self.cancel_guard(&conn);
+            let rows = func_ranks
+                .select((name, chksum.assume_not_null(), len, metadata.assume_not_null()))
+                .filter(chksum.eq_any(&chksums))
+                .load::<(String, Vec<u8>, i32, Vec<u8>)>(&mut conn)
+                .await?;
+            ct.consume();
+            rows
+        };
 
         let mut partial: HashMap<Vec<u8>, FunctionInfo> = rows
             .into_iter()
             .map(|row| {
-                let chksum: Vec<u8> = row.get(3);
                 let v = FunctionInfo {
-                    name: row.get(0),
-                    len: row.get::<_, i32>(1) as u32,
-                    data: row.get(2),
+                    name: row.0,
+                    len: row.2 as u32,
+                    data: row.3,
                     popularity: 0,
                 };
 
-                (chksum, v)
+                (row.1, v)
             })
             .collect();
         
@@ -135,220 +165,173 @@ impl Database {
         Ok(res)
     }
 
-    pub async fn get_or_create_user<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: Option<&'a crate::rpc::PushMetadata<'a>>) -> Result<i32, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(
-            r#"
-            WITH ins AS (
-                INSERT INTO users(lic_id, lic_data, hostname)
-                VALUES ($1, $3, $2)
-                ON CONFLICT DO NOTHING
-                RETURNING id
-            )
-            SELECT id FROM ins
-            UNION
-            SELECT id FROM users WHERE lic_id=$1 AND lic_data=$3 AND (($2 is not null AND hostname = $2) OR ($2 is null AND hostname is null))
-            "#).await?;
-            
+    pub async fn get_or_create_user<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, hostname: &str) -> Result<i32, anyhow::Error> {
+        use schema::users;
+
+        let conn = &mut self.diesel.get().await?;
+
         let lic_id = &user.lic_number[..];
         let lic_data = user.license_data;
-        let hostname = funcs.map(|v| v.hostname);
 
-        let row = conn.query(&stmt, &[&lic_id, &hostname, &lic_data]).await?;
-        if !row.is_empty() {
-            let id = row[0].get(0);
-            if row.len() > 1 {
-                let vals: Vec<i32> = row.iter().map(|v| v.get(0)).collect();
-                debug!("expected single row, got: {:?}", &vals);
+        match users::table.select(users::id)
+                .filter(users::lic_data.eq(lic_data))
+                .filter(users::lic_id.eq(lic_id))
+                .filter(users::hostname.eq(hostname))
+                .get_result::<i32>(conn).await {
+            Ok(v) => return Ok(v),
+            Err(diesel::result::Error::NotFound) => {},
+            Err(err) => {
+                error!("failed to get user: {err:?}");
+                return Err(err.into());
             }
-            Ok(id)
-        } else {
-            error!("no rows for user. ret 0");
-            Ok(0)
-        }
+        };
+
+        let user_id = diesel::insert_into(users::table)
+            .values(vec![
+                (
+                    users::lic_id.eq(lic_id),
+                    users::lic_data.eq(lic_data),
+                    users::hostname.eq(hostname),
+                )
+            ])
+            .returning(users::id) // xmax = 0 if the row is new
+            .get_result::<i32>(conn)
+            .await?;
+        // TODO: handle integrity error
+
+        Ok(user_id)
     }
 
-    async fn get_or_create_file<'a>(&self, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        WITH ins AS (
-            INSERT INTO files(chksum)
-            VALUES ($1)
-            ON CONFLICT(chksum) DO NOTHING
-            RETURNING id
-        )
-        SELECT id FROM files WHERE chksum=$1
-        UNION
-        SELECT id FROM ins
-        "#).await?;
-
+    async fn get_or_create_file<'a>(&self, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, anyhow::Error> {
         let hash = &funcs.md5[..];
 
-        let id: i32 = conn.query_one(&stmt, &[&hash]).await?
-            .get(0);
-        Ok(id)
+        use schema::files::{table as files, chksum, id};
+
+        let conn = &mut self.diesel.get().await?;
+
+        match files.filter(chksum.eq(hash))
+            .select(id)
+            .get_result::<i32>(conn)
+            .await {
+            Ok(v) => return Ok(v),
+            Err(err) if err != diesel::result::Error::NotFound => return Err(err.into()),
+            _ => {},
+        }
+
+        let file_id = diesel::insert_into(files)
+            .values(vec![(chksum.eq(hash),)])
+            .returning(id)
+            .get_result::<i32>(conn)
+            .await?;
+        // TODO: handle integrity error...
+        Ok(file_id)
     }
 
-    async fn get_or_create_db<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, deadpool_postgres::PoolError> {
+    async fn get_or_create_db<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, anyhow::Error> {
+        use schema::dbs::{table as dbs, id as db_id, user_id as db_user, file_id as db_file_id, file_path, idb_path};
+
         let file_id = self.get_or_create_file(funcs);
-        let user_id = self.get_or_create_user(user, Some(funcs));
+        let user_id = self.get_or_create_user(user, funcs.hostname);
 
         let (file_id, user_id): (i32, i32) = futures_util::try_join!(file_id, user_id)?;
 
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        WITH ins AS (
-            INSERT INTO dbs (user_id, file_id, file_path, idb_path)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT(idb_path,file_id,user_id) DO NOTHING
-            RETURNING id
-        )
-        SELECT id FROM dbs WHERE user_id=$1 AND file_id=$2 AND idb_path=$4
-        UNION
-        SELECT id FROM ins
-        "#).await?;
+        let conn = &mut self.diesel.get().await?;
 
-        let idb_path = funcs.idb_path;
-        let file_path = funcs.file_path;
-
-        trace!("fid={}; uid={}", file_id, user_id);
-        let row = conn.query_one(&stmt, &[&user_id, &file_id, &file_path, &idb_path]).await?;
-
-        let db_id = row.get(0);
-
-        Ok(db_id)
-    }
-
-    pub async fn push_funcs<'a, 'b>(&'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32]) -> Result<Vec<bool>, deadpool_postgres::PoolError> {
-        let db_id = self.get_or_create_db(user, funcs).await?;
-        
-        let mut conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        INSERT INTO funcs AS f (name, len, chksum, metadata, db_id, rank)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (db_id,chksum) DO UPDATE 
-            SET metadata=$4, rank=$6, name=$1, update_dt=CURRENT_TIMESTAMP
-            WHERE f.db_id=$5 AND f.chksum=$3 AND f.len=$2
-        RETURNING exists(SELECT 1 FROM funcs WHERE chksum=$3)
-        "#).await?;
-
-        debug_assert_eq!(scores.len(), funcs.funcs.len());
-
-        let mut res = Vec::with_capacity(funcs.funcs.len());
-
-        // NOTE: Do not access self.conn/prepare_cached before dropping tx - it will deadlock!
-        {
-            let tx = conn.transaction().await?;
-
-            for (func, &score) in funcs.funcs.iter().zip(scores.iter()) {
-                let name = func.name;
-                let len = func.func_len as i32;
-                let chksum = func.hash;
-                let md = func.func_data;
-                let score = score as i32;
-                let row_exists = tx.query_one(&stmt, &[
-                    &name, &len, &chksum, &md, &db_id, &score
-                ]).await?;
-
-                let row_exists: bool = row_exists.try_get(0)?;
-
-                res.push(!row_exists);
-            }
-
-            tx.commit().await?;
+        match dbs.select(db_id)
+            .filter(db_user.eq(user_id))
+            .filter(db_file_id.eq(file_id))
+            .filter(file_path.eq(funcs.file_path))
+            .filter(idb_path.eq(funcs.idb_path))
+            .get_result::<i32>(conn)
+            .await {
+            Ok(v) => return Ok(v),
+            Err(err) if err != diesel::result::Error::NotFound => return Err(err.into()),
+            _ => {},
         }
 
-        Ok(res)
+        let id = diesel::insert_into(dbs)
+            .values(vec![
+                (
+                    db_user.eq(user_id),
+                    db_file_id.eq(file_id),
+                    file_path.eq(funcs.file_path),
+                    idb_path.eq(funcs.idb_path),
+                )
+            ])
+            .returning(db_id)
+            .get_result::<i32>(conn)
+            .await?;
+        // TODO: handle integrity error
+        Ok(id)
     }
 
-    pub async fn is_online(&self) -> bool {
-        !self.pool.is_closed()
-    }
-
-    pub async fn get_stats(&self) -> Result<DbStats, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        SELECT 
-            (SELECT COUNT(*)::int FROM users) as users,
-            (SELECT COUNT(distinct lic_id)::int FROM users) as hosts,
-            (SELECT COUNT(distinct chksum)::int FROM funcs) as funcs,
-            (SELECT COUNT(*)::int FROM funcs) as total_funcs,
-            (SELECT COUNT(*)::int FROM dbs) as dbs,
-            (SELECT COUNT(*)::int FROM files) as files
-        "#).await?;
-
-        let guard = self.cancel_guard(&conn);
-        let row = conn.query_one(&stmt, &[]).await?;
-        guard.consume();
-
-        Ok(DbStats {
-            unique_lics: row.try_get(0)?,
-            unique_hosts_per_lic: row.try_get(1)?,
-            unique_funcs: row.try_get(2)?,
-            total_funcs: row.try_get(3)?,
-            dbs: row.try_get(4)?,
-            unique_files: row.try_get(5)?,
-        })
-    }
-
-    pub async fn get_file_funcs(&self, md5: &[u8], offset: i64, limit: i64) -> Result<Vec<(String, u32, [u8; 16])>, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        SELECT fns.name, fns.len, fns.chksum FROM funcs AS fns
-        LEFT JOIN dbs AS d ON (d.id=fns.db_id)
-        LEFT JOIN files AS f ON (d.file_id=f.id)
-        WHERE 
-            f.chksum=$1
-        LIMIT $2
-        OFFSET $3
-        "#).await?;
+    pub async fn push_funcs<'a, 'b>(&'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32]) -> Result<Vec<bool>, anyhow::Error> {
+        let db_id = self.get_or_create_db(user, funcs).await?;
         
-        let guard = self.cancel_guard(&conn);
-        let rows = conn.query(&stmt, &[&md5, &limit, &offset]).await?;
-        guard.consume();
+        let mut rows = Vec::with_capacity(funcs.funcs.len());
+        for (func, &score) in funcs.funcs.iter().zip(scores.iter()) {
+            let name = func.name;
+            let len = func.func_len as i32;
+            let chksum = func.hash;
+            let md = func.func_data;
+            let score = score as i32;
 
-        let res = rows.into_iter()
-            .map(|row| {
-                let name: String = row.get(0);
-                let len: i32 = row.get(1);
-                let md5_a: Vec<u8> = row.get(2);
+            rows.push((
+                schema::funcs::name.eq(name),
+                schema::funcs::len.eq(len),
+                schema::funcs::chksum.eq(chksum),
+                schema::funcs::metadata.eq(md),
+                schema::funcs::rank.eq(score),
+                schema::funcs::db_id.eq(db_id),
+            ));
+        }
 
-                let mut md5 = [0u8; 16];
-                md5.copy_from_slice(&md5_a);
+        let f2 = diesel::alias!(schema::funcs as f2);
+        let conn = &mut self.diesel.get().await?;
 
-                (name, len as u32, md5)
-            })
-            .collect();
+        let is_new: Vec<bool> = diesel::insert_into(schema::funcs::table)
+            .values(rows)
+            .on_conflict((schema::funcs::chksum, schema::funcs::db_id))
+            .do_update()
+                .set((
+                    schema::funcs::name.eq(excluded(schema::funcs::name)),
+                    schema::funcs::metadata.eq(excluded(schema::funcs::metadata)),
+                    schema::funcs::rank.eq(excluded(schema::funcs::rank)),
+                    schema::funcs::update_dt.eq(diesel::dsl::now)
+                ))
+            .returning(diesel::dsl::not(diesel::dsl::exists(f2.filter(f2.field(schema::funcs::chksum).eq(schema::funcs::chksum))))) // xmax=0 when a new row is created.
+            .get_results::<bool>(conn)
+            .await?;
+        Ok(is_new)
+    }
+
+    pub async fn get_file_funcs(&self, md5: &[u8], offset: i64, limit: i64) -> Result<Vec<(String, i32, Vec<u8>)>, anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+        let results = schema::funcs::table
+            .left_join(schema::dbs::table.left_join(schema::files::table))
+            .select((schema::funcs::name.assume_not_null(), schema::funcs::len.assume_not_null(), schema::funcs::chksum.assume_not_null()))
+            .filter(schema::files::chksum.eq(md5))
+            .offset(offset)
+            .limit(limit)
+            .get_results::<(String, i32, Vec<u8>)>(conn).await?;
+        Ok(results)
+    }
+
+    pub async fn get_files_with_func(&self, func: &[u8]) -> Result<Vec<Vec<u8>>, anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+
+        let res = schema::files::table
+            .left_join(schema::dbs::table.left_join(schema::funcs::table))
+            .select(schema::files::chksum.assume_not_null())
+            .distinct()
+            .filter(schema::funcs::chksum.eq(func))
+            .get_results::<Vec<u8>>(conn)
+            .await?;
         Ok(res)
     }
 
-    pub async fn get_files_with_func(&self, func: &[u8]) -> Result<Vec<[u8; 16]>, deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached(r#"
-        SELECT DISTINCT f.chksum FROM files f
-        LEFT JOIN dbs d ON (d.file_id = f.id)
-        LEFT JOIN funcs fns ON (fns.db_id = d.id)
-        WHERE
-            fns.chksum = $1
-        "#).await?;
-        let guard = self.cancel_guard(&conn);
-        let rows = conn.query(&stmt, &[&func]).await?;
-        guard.consume();
-
-        let res = rows
-            .into_iter()
-            .map(|v| {
-                let mut chksum = [0u8; 16];
-                let v: Vec<u8> = v.get(0);
-                chksum.copy_from_slice(&v);
-                chksum
-            })
-            .collect();
-        Ok(res)
-    }
-
-    fn cancel_guard(&self, conn: &deadpool_postgres::Object) -> AsyncDropGuard {
-        let token = conn.cancel_token();
+    fn cancel_guard<C: Into<Token>>(&self, conn: C) -> AsyncDropGuard {
+        let token = conn.into().0;
         let tls_connector = self.tls_connector.clone();
         self.dropper.defer(async move {
             debug!("cancelling query...");
@@ -361,18 +344,27 @@ impl Database {
         })
     }
 
-    pub async fn delete_metadata(&self, req: &crate::rpc::DelHistory<'_>) -> Result<(), deadpool_postgres::PoolError> {
-        let conn = self.pool.get().await?;
-        let stmt = conn.prepare_cached("DELETE FROM funcs WHERE chksum = ANY($1)").await?;
+    pub async fn delete_metadata(&self, req: &crate::rpc::DelHistory<'_>) -> Result<(), anyhow::Error> {
+        use schema::funcs::{table as funcs, chksum};
 
         let chksums = req.funcs.iter()
             .map(|v| v.as_slice())
             .collect::<Vec<_>>();
+
+        let conn = &mut self.diesel.get().await?;
+        let rows_modified = diesel::delete(funcs.filter(chksum.eq_any(&chksums)))
+            .execute(conn)
+            .await?;
         
-        conn.execute(&stmt, &[
-            &chksums
-        ]).await?;
+        debug!("deleted {rows_modified} rows");
 
         Ok(())
+    }
+}
+
+struct Token(CancelToken);
+impl<'a> From<&'a diesel_async::pooled_connection::bb8::PooledConnection<'a, diesel_async::AsyncPgConnection>> for Token {
+    fn from(value: &'a diesel_async::pooled_connection::bb8::PooledConnection<diesel_async::AsyncPgConnection>) -> Self {
+        Self(value.cancel_token())
     }
 }

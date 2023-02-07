@@ -18,7 +18,7 @@ server_cert = "path/to/server_crt"
 
 [database]
 # Specifies a postgresql connection string. All variables can be found here: https://docs.rs/tokio-postgres/0.6.0/tokio_postgres/config/struct.Config.html
-connection_info = "host=127.0.0.1 port=49153 user=postgres password=1"
+connection_info = "postgres://postgres:1@127.0.0.1/postgres"
 # Sets if the database connection should be made using TLS.
 use_tls = false
 # If the database requires a secure connection, paths to server-ca and client-id certificates can be set here:
