@@ -6,6 +6,7 @@
 - Support for IDA 8.1+ delete command.
 - Pooling for connections to database.
 - Attempt to cancel immutable database queries if client leaves.
+- Database migrations via Diesel ORM.
 
 ### Fixed
 - 8K stack size is too small for debug builds.

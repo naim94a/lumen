@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use toml::from_slice;
+use toml::from_str;
 use std::{net::SocketAddr, path::PathBuf};
 
 #[derive(Deserialize)]
@@ -51,5 +51,7 @@ pub fn load_config<R: std::io::Read>(mut fd: R) -> Config {
     let mut buf = vec![];
     fd.read_to_end(&mut buf).expect("failed to read config");
 
-    from_slice(&buf).expect("failed to parse configuration")
+    let buf = std::str::from_utf8(&buf).expect("file contains invalid utf-8");
+
+    from_str(buf).expect("failed to parse configuration")
 }
