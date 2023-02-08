@@ -1,8 +1,8 @@
 use log::*;
 use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
-use tokio_postgres::{tls::MakeTlsConnect, Socket, CancelToken, NoTls};
-use std::{collections::HashMap, str::Bytes};
+use tokio_postgres::{tls::MakeTlsConnect, Socket, NoTls};
+use std::{collections::HashMap};
 use crate::async_drop::{AsyncDropper, AsyncDropGuard};
 mod schema_auto;
 pub mod schema;
@@ -332,7 +332,7 @@ impl Database {
         Ok(res)
     }
 
-    fn cancel_guard<'a>(&self, conn: &diesel_async::pooled_connection::bb8::PooledConnection<'a, diesel_async::AsyncPgConnection>) -> AsyncDropGuard {
+    fn cancel_guard(&self, conn: &diesel_async::pooled_connection::bb8::PooledConnection<'_, diesel_async::AsyncPgConnection>) -> AsyncDropGuard {
         let token = conn.cancel_token();
         let tls_connector = self.tls_connector.clone();
         self.dropper.defer(async move {
