@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use log::*;
 use warp::{Filter, Reply, Rejection};
-use crate::{db::DbStats};
 use serde::Serialize;
 
 use super::SharedState;
@@ -49,17 +48,12 @@ pub fn api_root(state: SharedState) -> impl Filter<Extract = (impl Reply + 'stat
         .and_then(view_file_by_hash);
     let view_func = warp::get()
         .and(warp::path("funcs"))
-        .and(super::with_state(state.clone()))
+        .and(super::with_state(state))
         .and(warp::filters::path::param::<Md5>())
         .and_then(view_func_by_hash);
-    let view_status = warp::get()
-        .and(warp::path("status"))
-        .and(super::with_state(state))
-        .and_then(view_status);
 
     view_file
         .or(view_func)
-        .or(view_status)
 }
 
 // GET server/api/files/:md5
@@ -80,10 +74,12 @@ async fn view_file_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
     };
     let v: Vec<_> = v.into_iter()
         .map(|v| {
+            let mut hash = [0u8; 16];
+            hash.copy_from_slice(&v.2);
             FileFunc {
                 name: v.0,
-                len: v.1,
-                hash: Md5(v.2),
+                len: v.1 as u32,
+                hash: Md5(hash),
             }
         })
         .collect();
@@ -134,7 +130,11 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
         }
     };
 
-    let files_with: Vec<Md5> = files_with.into_iter().map(Md5).collect();
+    let files_with: Vec<Md5> = files_with.into_iter().map(|v| {
+        let mut md5 = [0u8; 16];
+        md5.copy_from_slice(&v);
+        Md5(md5)
+    }).collect();
 
     let v = files_info;
     let v: Vec<FuncInfo> = v
@@ -201,29 +201,4 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
         }).collect();
 
     Result::<_, Rejection>::Ok(warp::reply::json(&v))
-}
-
-// GET /api/status
-async fn view_status(state: SharedState) -> Result<impl Reply, Rejection> {
-    #[derive(Serialize)]
-    enum DbStatus {
-        Stats(DbStats),
-        Error(String),
-    }
-
-    #[derive(Serialize)]
-    struct Response {
-        db_online: bool,
-        stats: DbStatus,
-    }
-
-    let stats = match state.db.get_stats().await {
-        Ok(stats) => DbStatus::Stats(stats),
-        Err(err) => DbStatus::Error(format!("{err}")),
-    };
-
-    Result::<_, Rejection>::Ok(warp::reply::json(&Response {
-        db_online: state.db.is_online().await,
-        stats,
-    }))
 }
