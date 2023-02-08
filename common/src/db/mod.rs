@@ -2,13 +2,13 @@ use log::*;
 use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
 use tokio_postgres::{tls::MakeTlsConnect, Socket, CancelToken, NoTls};
-use std::collections::HashMap;
+use std::{collections::HashMap, str::Bytes};
 use crate::async_drop::{AsyncDropper, AsyncDropGuard};
 mod schema_auto;
 pub mod schema;
 pub mod models;
 
-use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods};
+use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods, sql_types::{Array, Binary, VarChar, Integer}, query_builder::{QueryFragment, Query}};
 use diesel_async::RunQueryDsl;
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
@@ -50,7 +50,7 @@ impl Database {
         let (dropper, worker) = AsyncDropper::new();
         tokio::task::spawn(worker);
 
-        let diesel =  Self::make_bb8_pool(connection_string, tls_connector.clone()).await;
+        let diesel =  Self::make_bb8_pool(connection_string, tls_connector.clone()).await?;
 
         Ok(Database{
             tls_connector,
@@ -78,7 +78,7 @@ impl Database {
         diesel_async::AsyncPgConnection::try_from(cli).await
     }
 
-    async fn make_bb8_pool(db_url: &str, tls: Option<MakeTlsConnector>) -> diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection> {
+    async fn make_bb8_pool(db_url: &str, tls: Option<MakeTlsConnector>) -> Result<diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection>, anyhow::Error> {
         let cfg = diesel_async::pooled_connection::AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new_with_setup(db_url, move |db_url| {
             let tls = tls.clone();
             Box::pin( async move {
@@ -93,9 +93,8 @@ impl Database {
         let pool = diesel_async::pooled_connection::bb8::Pool::builder()
             .min_idle(Some(1))
             .build(cfg)
-                .await
-                .unwrap();
-        pool
+                .await?;
+        Ok(pool)
     }
 
     async fn make_tls(database: &crate::config::Database) -> MakeTlsConnector {
@@ -123,25 +122,18 @@ impl Database {
         MakeTlsConnector::new(tls_connector)
     }
 
-    // async fn get_db(&self) -> Result<diesel_async::pooled_connection::bb8::PooledConnection<diesel_async::AsyncPgConnection>, anyhow::Error> {
-    //     Ok(self.diesel.get().await?)
-    // }
-
     pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, anyhow::Error> {
         let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
-        let rows = {
-            use schema::func_ranks::{table as func_ranks, name, len, metadata, chksum};
+        let rows: Vec<(String, i32, Vec<u8>, Vec<u8>)> = {
+            let conn = &mut self.diesel.get().await?;
 
-            let mut conn = self.diesel.get().await?;
-            let ct = self.cancel_guard(&conn);
-            let rows = func_ranks
-                .select((name, chksum.assume_not_null(), len, metadata.assume_not_null()))
-                .filter(chksum.eq_any(&chksums))
-                .load::<(String, Vec<u8>, i32, Vec<u8>)>(&mut conn)
-                .await?;
+            let ct = self.cancel_guard(&*conn);
+
+            let res: Vec<_> = BestMds(chksums.as_slice())
+                .get_results::<_>(conn).await?;
             ct.consume();
-            rows
+            res
         };
 
         let mut partial: HashMap<Vec<u8>, FunctionInfo> = rows
@@ -149,15 +141,15 @@ impl Database {
             .map(|row| {
                 let v = FunctionInfo {
                     name: row.0,
-                    len: row.2 as u32,
-                    data: row.3,
+                    len: row.1 as u32,
+                    data: row.2,
                     popularity: 0,
                 };
 
-                (row.1, v)
+                (row.3, v)
             })
             .collect();
-        
+
         let results = partial.len();
 
         let res: Vec<Option<FunctionInfo>> = chksums.iter().map(|&chksum| {
@@ -340,8 +332,8 @@ impl Database {
         Ok(res)
     }
 
-    fn cancel_guard<C: Into<Token>>(&self, conn: C) -> AsyncDropGuard {
-        let token = conn.into().0;
+    fn cancel_guard<'a>(&self, conn: &diesel_async::pooled_connection::bb8::PooledConnection<'a, diesel_async::AsyncPgConnection>) -> AsyncDropGuard {
+        let token = conn.cancel_token();
         let tls_connector = self.tls_connector.clone();
         self.dropper.defer(async move {
             debug!("cancelling query...");
@@ -372,9 +364,25 @@ impl Database {
     }
 }
 
-struct Token(CancelToken);
-impl<'a> From<&'a diesel_async::pooled_connection::bb8::PooledConnection<'a, diesel_async::AsyncPgConnection>> for Token {
-    fn from(value: &'a diesel_async::pooled_connection::bb8::PooledConnection<diesel_async::AsyncPgConnection>) -> Self {
-        Self(value.cancel_token())
+// This is eww, but it's the fastest.
+struct BestMds<'a>(&'a [&'a [u8]]);
+impl<'a> QueryFragment<diesel::pg::Pg> for BestMds<'a> {
+    fn walk_ast<'b>(&'b self, mut pass: diesel::query_builder::AstPass<'_, 'b, diesel::pg::Pg>) -> diesel::QueryResult<()> {
+        pass.push_sql(r#"WITH best AS (
+            select chksum,MAX(rank) as maxrank from funcs f1
+            WHERE chksum = ANY("#);
+        pass.push_bind_param::<Array<Binary>, _>(&self.0)?;
+        pass.push_sql(r#") 
+            GROUP BY chksum 
+        )
+        SELECT f2.name,f2.len,f2.metadata,f2.chksum FROM best
+        LEFT JOIN funcs f2 ON (best.chksum=f2.chksum AND best.maxrank=f2.rank)"#);
+        Ok(())
     }
+}
+impl<'a> diesel::query_builder::QueryId for BestMds<'a> {
+    type QueryId = BestMds<'static>;
+}
+impl<'a> Query for BestMds<'a> {
+    type SqlType = (VarChar, Integer, Binary, Binary);
 }
