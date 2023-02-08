@@ -123,6 +123,10 @@ impl Database {
         MakeTlsConnector::new(tls_connector)
     }
 
+    // async fn get_db(&self) -> Result<diesel_async::pooled_connection::bb8::PooledConnection<diesel_async::AsyncPgConnection>, anyhow::Error> {
+    //     Ok(self.diesel.get().await?)
+    // }
+
     pub async fn get_funcs(&self, funcs: &[crate::rpc::PullMetadataFunc<'_>]) -> Result<Vec<Option<FunctionInfo>>, anyhow::Error> {
         let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
 
@@ -173,20 +177,18 @@ impl Database {
         let lic_id = &user.lic_number[..];
         let lic_data = user.license_data;
 
-        match users::table.select(users::id)
-                .filter(users::lic_data.eq(lic_data))
-                .filter(users::lic_id.eq(lic_id))
-                .filter(users::hostname.eq(hostname))
-                .get_result::<i32>(conn).await {
+        let get_user = || users::table.select(users::id)
+            .filter(users::lic_data.eq(lic_data))
+            .filter(users::lic_id.eq(lic_id))
+            .filter(users::hostname.eq(hostname));
+
+        match get_user().get_result::<i32>(conn).await {
             Ok(v) => return Ok(v),
-            Err(diesel::result::Error::NotFound) => {},
-            Err(err) => {
-                error!("failed to get user: {err:?}");
-                return Err(err.into());
-            }
+            Err(err) if err != diesel::result::Error::NotFound => return Err(err.into()),
+            _ => {},
         };
 
-        let user_id = diesel::insert_into(users::table)
+        match diesel::insert_into(users::table)
             .values(vec![
                 (
                     users::lic_id.eq(lic_id),
@@ -196,35 +198,40 @@ impl Database {
             ])
             .returning(users::id) // xmax = 0 if the row is new
             .get_result::<i32>(conn)
-            .await?;
-        // TODO: handle integrity error
+            .await {
+            Ok(v) => return Ok(v),
+            Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)) => {},
+            Err(e) => return Err(e.into()),
+        }
 
-        Ok(user_id)
+        Ok(get_user().get_result::<i32>(conn).await?)
     }
 
     async fn get_or_create_file<'a>(&self, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, anyhow::Error> {
-        let hash = &funcs.md5[..];
-
         use schema::files::{table as files, chksum, id};
+
+        let hash = &funcs.md5[..];
 
         let conn = &mut self.diesel.get().await?;
 
-        match files.filter(chksum.eq(hash))
-            .select(id)
-            .get_result::<i32>(conn)
-            .await {
+        let get_file = || files.filter(chksum.eq(hash)).select(id);
+
+        match get_file().get_result::<i32>(conn).await {
             Ok(v) => return Ok(v),
             Err(err) if err != diesel::result::Error::NotFound => return Err(err.into()),
             _ => {},
         }
 
-        let file_id = diesel::insert_into(files)
+        match diesel::insert_into(files)
             .values(vec![(chksum.eq(hash),)])
             .returning(id)
             .get_result::<i32>(conn)
-            .await?;
-        // TODO: handle integrity error...
-        Ok(file_id)
+            .await {
+            Ok(v) => return Ok(v),
+            Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)) => {},
+            Err(e) => return Err(e.into()),
+        }
+        Ok(get_file().get_result::<i32>(conn).await?)
     }
 
     async fn get_or_create_db<'a>(&self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>) -> Result<i32, anyhow::Error> {
@@ -237,32 +244,35 @@ impl Database {
 
         let conn = &mut self.diesel.get().await?;
 
-        match dbs.select(db_id)
-            .filter(db_user.eq(user_id))
-            .filter(db_file_id.eq(file_id))
-            .filter(file_path.eq(funcs.file_path))
-            .filter(idb_path.eq(funcs.idb_path))
-            .get_result::<i32>(conn)
-            .await {
+        let get_db = || {
+            dbs.select(db_id)
+                .filter(db_user.eq(user_id))
+                .filter(db_file_id.eq(file_id))
+                .filter(file_path.eq(funcs.file_path))
+                .filter(idb_path.eq(funcs.idb_path))
+        };
+
+        match get_db().get_result::<i32>(conn).await {
             Ok(v) => return Ok(v),
             Err(err) if err != diesel::result::Error::NotFound => return Err(err.into()),
             _ => {},
-        }
+        };
 
-        let id = diesel::insert_into(dbs)
-            .values(vec![
-                (
-                    db_user.eq(user_id),
-                    db_file_id.eq(file_id),
-                    file_path.eq(funcs.file_path),
-                    idb_path.eq(funcs.idb_path),
-                )
-            ])
+        match diesel::insert_into(dbs)
+            .values(vec![(
+                db_user.eq(user_id),
+                db_file_id.eq(file_id),
+                file_path.eq(funcs.file_path),
+                idb_path.eq(funcs.idb_path),
+            )])
             .returning(db_id)
             .get_result::<i32>(conn)
-            .await?;
-        // TODO: handle integrity error
-        Ok(id)
+            .await {
+            Ok(id) => return Ok(id),
+            Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)) => {},
+            Err(e) => return Err(e.into()),
+        };
+        Ok(get_db().get_result::<i32>(conn).await?)
     }
 
     pub async fn push_funcs<'a, 'b>(&'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32]) -> Result<Vec<bool>, anyhow::Error> {
