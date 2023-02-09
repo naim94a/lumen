@@ -1,31 +1,31 @@
-version: '3.7'
-
+name: lumen
 volumes:
-        postgres_data:
+    postgres_data:
+
 services:
-        db:
-                image: postgres:13-alpine
-                container_name: lumina-postgres
-                environment:
-                        POSTGRES_USER: lumina
-                        POSTGRES_DB: lumina
-                        POSTGRES_PASSWORD: 1
-                expose:
-                        - "5432"
-                volumes:
-                        - postgres_data:/var/lib/postgresql
-                        - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
-        lumina:
-                build: .
-                command: sh -c 'while ! nc -vv -z db 5432; do sleep 1; done; /lumen/docker-init.sh'
-                depends_on:
-                        - db
-                ports:
-                        - 1234:1234
-                        - 8082:8082
-                environment:
-                        PKCSPASSWD: $PKCSPASSWD
-                volumes:
-                        - ./dockershare:/dockershare
-                links:
-                        - db
+    db:
+        image: postgres:15.1-alpine
+        container_name: lumina-postgres
+        environment:
+            POSTGRES_USER: lumina
+            POSTGRES_DB: lumina
+            POSTGRES_PASSWORD: 1
+        expose:
+            - "5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql
+        mem_swappiness: 0
+
+    lumina:
+        build: .
+        depends_on:
+            - db
+        ports:
+            - 1234:1234
+            - 8082:8082
+        environment:
+            PKCSPASSWD: $PKCSPASSWD
+        volumes:
+            - ./dockershare:/dockershare
+        links:
+            - db

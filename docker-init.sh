@@ -1,11 +1,12 @@
 #!/bin/sh
 CFGPATH="/dockershare"
 KEYPATH="/lumen/lumen.p12"
+export DATABASE_URL="postgres://lumina:1@db/lumina"
 die(){
     echo "Exiting due to error: $@" && exit 1
 }
 do_config_fixup(){
-           sed -i -e "s,connection_info.*,connection_info = \"host=db port=5432 user=lumina password=1\"," \
+           sed -i -e "s,connection_info.*,connection_info = \"${DATABASE_URL}\"," \
 	   /lumen/config.toml
 }
 use_default_config(){
@@ -66,4 +67,7 @@ setup_config(){
 
 setup_config ;
 do_config_fixup ;
-lumen -c /lumen/config.toml || die "Launching lumen";
+echo Running DB migrations...
+diesel --config-file /usr/lib/lumen/diesel.toml migration run
+echo Migrations done.
+exec lumen -c /lumen/config.toml
