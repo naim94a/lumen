@@ -154,7 +154,6 @@ dependencies = [
  "native-tls",
  "postgres-native-tls",
  "serde",
- "time",
  "tokio",
  "tokio-postgres",
  "toml",

@@ -6,7 +6,6 @@ use std::{collections::HashMap};
 use crate::async_drop::{AsyncDropper, AsyncDropGuard};
 mod schema_auto;
 pub mod schema;
-pub mod models;
 
 use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods, sql_types::{Array, Binary, VarChar, Integer}, query_builder::{QueryFragment, Query}};
 use diesel_async::RunQueryDsl;
