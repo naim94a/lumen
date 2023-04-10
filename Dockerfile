@@ -1,6 +1,7 @@
-FROM rust:1.67.0-slim-buster
+FROM rust:1.68.2-slim-buster
 ARG	DEBIAN_FRONTEND=noninteractive
 RUN	apt-get update && apt-get install -y --no-install-recommends --no-install-suggests ca-certificates pkg-config libssl-dev libpq-dev
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN cargo install diesel_cli --version 2.0.1 --no-default-features --features postgres
 
 COPY	common	/lumen/common
