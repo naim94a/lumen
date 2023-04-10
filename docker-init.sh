@@ -1,7 +1,6 @@
 #!/bin/sh
 CFGPATH="/dockershare"
 KEYPATH="/lumen/lumen.p12"
-export DATABASE_URL="postgres://lumina:1@db/lumina"
 die(){
     echo "Exiting due to error: $@" && exit 1
 }
