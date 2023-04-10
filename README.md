@@ -11,8 +11,15 @@ You can read about the protocol research [here](https://abda.nl/posts/introducin
 - Experimental HTTP API that allows querying the database for comments by file or function hash.
 
 ## Getting Started
-### Binary releases
-Release binaries are available at https://github.com/naim94a/lumen/releases/latest.
+
+### Docker Method (Recommended)
+In this method precompiled docker images will be downloaded, All you need is [docker-compose.yml](./docker-compose.yml).
+
+1. Install `docker-engine` and `docker-compose`.
+2. If using a custom TLS certificate, copy the private key (`.p12`/`.pfx` extension) to `./dockershare` and set the key password in `.env` as `PKCSPASSWD`.
+3. If using a custom Lumen config, copy it to `./dockershare/config.toml`.
+4. Otherwise, or if you have finished these steps, just run `docker-compose up`.
+5. Regardless, if TLS is enabled in the `config.toml`, a `hexrays.crt` will be generated in `./dockershare` to be copied to the IDA install directory.
 
 ### Building from source with Rust
 1. `git clone https://github.com/naim94a/lumen.git`
@@ -20,13 +27,6 @@ Release binaries are available at https://github.com/naim94a/lumen/releases/late
 3. `cd lumen`
 4. Setup a Postgres database and execute src/schema.sql on it
 5. `cargo build --release`
-
-### Docker Method
-1. Install `docker-engine` and `docker-compose`.
-2. If using a custom TLS certificate, copy the private key (`.p12`/`.pfx` extension) to `./dockershare` and set the key password in `.env` as `PKCSPASSWD`.
-3. If using a custom Lumen config, copy it to `./dockershare/config.toml`.
-4. Otherwise, or if you have finished these steps, just run `docker-compose up`.
-5. Regardless, if TLS is enabled in the `config.toml`, a `hexrays.crt` will be generated in `./dockershare` to be copied to the IDA install directory.
 
 ### Usage
 ```

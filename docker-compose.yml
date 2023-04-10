@@ -22,7 +22,11 @@ services:
         mem_swappiness: 0
 
     lumina:
-        build: .
+        ## Uncomment the following line to compile locally
+        # build: .
+
+        ## Comment the following line to compile locally
+        image: ghcr.io/naim94a/lumen:master
         depends_on:
             db:
                 condition: service_healthy

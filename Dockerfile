@@ -27,4 +27,4 @@ COPY	config-example.toml	docker-init.sh	/lumen/
 RUN	chmod a+x /lumen/docker-init.sh && chmod a+x /usr/bin/lumen
 WORKDIR	/lumen
 STOPSIGNAL SIGINT
-ENTRYPOINT exec /lumen/docker-init.sh
+CMD /lumen/docker-init.sh
