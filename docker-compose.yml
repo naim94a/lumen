@@ -6,6 +6,11 @@ services:
     db:
         image: postgres:15.1-alpine
         container_name: lumina-postgres
+        healthcheck:
+            test: ["CMD", "pg_isready", "-U", "lumina"]
+            interval: 5s
+            retries: 10
+            timeout: 5s
         environment:
             POSTGRES_USER: lumina
             POSTGRES_DB: lumina
@@ -19,7 +24,8 @@ services:
     lumina:
         build: .
         depends_on:
-            - db
+            db:
+                condition: service_healthy
         ports:
             - 1234:1234
             - 8082:8082
