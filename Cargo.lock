@@ -260,8 +260,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.2"
-source = "git+https://github.com/diesel-rs/diesel?branch=master#380e90341983dbd964e91e9cad649d09cbe05cab"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7a532c1f99a0f596f6960a60d1e119e91582b24b39e2d83a190e61262c3ef0c"
 dependencies = [
  "bitflags 2.2.1",
  "byteorder",
@@ -272,8 +273,9 @@ dependencies = [
 
 [[package]]
 name = "diesel-async"
-version = "0.2.2"
-source = "git+https://github.com/weiznich/diesel_async?branch=main#67c677e5be5e31f0d8d7d333cd31a81fa50d585f"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10e214a94ce6f3a5835d5d09db34036fab0580cf9acec947c5ec77bf610569c2"
 dependencies = [
  "async-trait",
  "bb8",
@@ -286,8 +288,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.0.2"
-source = "git+https://github.com/diesel-rs/diesel?branch=master#380e90341983dbd964e91e9cad649d09cbe05cab"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74398b79d81e52e130d991afeed9c86034bb1b7735f46d2f5bf7deb261d80303"
 dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
@@ -298,7 +301,8 @@ dependencies = [
 [[package]]
 name = "diesel_table_macro_syntax"
 version = "0.1.0"
-source = "git+https://github.com/diesel-rs/diesel?branch=master#380e90341983dbd964e91e9cad649d09cbe05cab"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc5557efc453706fed5e4fa85006fe9817c224c3f480a34c7e5959fd700921c5"
 dependencies = [
  "syn 2.0.15",
 ]
