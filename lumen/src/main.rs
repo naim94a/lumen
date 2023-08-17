@@ -5,7 +5,7 @@
 #![deny(clippy::all)]
 
 use common::async_drop::AsyncDropper;
-use common::rpc::{RpcHello, RpcFail};
+use common::rpc::{RpcHello, RpcFail, HelloResult};
 use native_tls::Identity;
 use clap::Arg;
 use log::*;
@@ -199,7 +199,20 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
         }
     }
 
-    let resp = rpc::RpcMessage::Ok(());
+    let resp = match hello.protocol_version {
+        0..=4 => rpc::RpcMessage::Ok(()),
+
+        // starting IDA 8.3
+        5.. => rpc::RpcMessage::HelloResult(HelloResult {
+            unk0: "".into(),
+            unk1: "".into(),
+            unk2: "".into(),
+            unk3: "".into(),
+            unk4: 0,
+            unk5: 0,
+            unk6: 0,
+        })
+    };
     resp.async_write(&mut stream).await?;
 
     loop {
