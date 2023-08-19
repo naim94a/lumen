@@ -89,6 +89,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
             };
             let pulled_funcs = funcs.iter().filter(|v| v.is_some()).count();
             state.metrics.pulls.inc_by(pulled_funcs as _);
+            state.metrics.queried_funcs.inc_by(md.funcs.len() as _);
             debug!("pull {pulled_funcs}/{} funcs ended after {:?}", md.funcs.len(), start.elapsed());
 
             let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();

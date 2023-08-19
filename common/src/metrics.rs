@@ -17,8 +17,11 @@ pub struct Metrics {
     /// Count pushed functions
     pub pushes: Counter<u64>,
 
-    /// Count pulled functions
+    /// Count pulled functions (only found)
     pub pulls: Counter<u64>,
+
+    /// Queried functions
+    pub queried_funcs: Counter<u64>,
 }
 
 #[derive(EncodeLabelSet, Debug, Hash, Eq, PartialEq, Clone)]
@@ -45,6 +48,9 @@ impl Default for Metrics {
         let pulls = Counter::default();
         registry.register("lumen_pulls_total", "Total pulled functions", pulls.clone());
 
+        let queried_funcs = Counter::default();
+        registry.register("lumen_queried_total", "Total Queried functions", queried_funcs.clone());
+
         Metrics {
             registry,
             active_connections,
@@ -52,6 +58,7 @@ impl Default for Metrics {
             new_funcs,
             pushes,
             pulls,
+            queried_funcs,
         }
     }
 }
