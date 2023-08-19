@@ -9,11 +9,13 @@ pub mod md;
 pub mod rpc;
 pub mod web;
 pub mod async_drop;
+pub mod metrics;
 
 pub struct SharedState_ {
     pub db: db::Database,
     pub config: std::sync::Arc<config::Config>,
     pub server_name: String,
+    pub metrics: metrics::Metrics,
 }
 
 pub type SharedState = std::sync::Arc<SharedState_>;
