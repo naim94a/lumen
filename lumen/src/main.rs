@@ -5,6 +5,7 @@
 #![deny(clippy::all)]
 
 use common::async_drop::AsyncDropper;
+use common::metrics::LuminaVersion;
 use common::rpc::{RpcHello, RpcFail, HelloResult};
 use native_tls::Identity;
 use clap::Arg;
@@ -12,7 +13,6 @@ use log::*;
 use tokio::time::timeout;
 use std::collections::HashMap;
 use std::mem::discriminant;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use std::{borrow::Cow, sync::Arc};
 use tokio::{net::TcpListener, io::AsyncWrite, io::AsyncRead};
@@ -87,7 +87,9 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                     return Err(Error::Timeout);
                 }
             };
-            debug!("pull {}/{} funcs ended after {:?}", funcs.iter().filter(|v| v.is_some()).count(), md.funcs.len(), start.elapsed());
+            let pulled_funcs = funcs.iter().filter(|v| v.is_some()).count();
+            state.metrics.pulls.inc_by(pulled_funcs as _);
+            debug!("pull {pulled_funcs}/{} funcs ended after {:?}", md.funcs.len(), start.elapsed());
 
             let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();
             let found = funcs
@@ -127,7 +129,12 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                     return Ok(());
                 }
             };
-            debug!("push {} funcs ended after {:?}", status.len(), start.elapsed());
+            state.metrics.pushes.inc_by(status.len() as _);
+            let new_funcs = status
+                .iter()
+                .fold(0u64, |counter, &v| if v > 0 { counter + 1 } else {counter});
+            state.metrics.new_funcs.inc_by(new_funcs);
+            debug!("push {} funcs ended after {:?} ({new_funcs} new)", status.len(), start.elapsed());
 
             RpcMessage::PushMetadataResult(rpc::PushMetadataResult {
                 status: Cow::Owned(status),
@@ -187,6 +194,9 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
             return Ok(());
         }
     };
+    state.metrics.lumina_version.get_or_create(&LuminaVersion {
+        protocol_version: hello.protocol_version,
+    }).inc();
 
     if let Some(ref creds) = creds {
         if creds.username != "guest" {
@@ -229,7 +239,6 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedStat
 }
 
 async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAcceptor>, state: SharedState, mut shutdown_signal: tokio::sync::oneshot::Receiver<()>) {
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let accpt = accpt.map(Arc::new);
 
     let (async_drop, worker) = AsyncDropper::new();
@@ -264,10 +273,9 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
         let accpt = accpt.clone();
 
         let conns2 = connections.clone();
+        let counter = state.metrics.active_connections.clone();
         let guard = async_drop.defer(async move {
-            let count = {
-                COUNTER.fetch_sub(1, Ordering::Relaxed) - 1
-            };
+            let count = counter.dec() - 1;
             debug!("connection with {:?} ended after {:?}; {} active connections", addr, start.elapsed(), count);
 
             let mut guard = conns2.lock().await;
@@ -275,10 +283,12 @@ async fn serve(listener: TcpListener, accpt: Option<tokio_native_tls::TlsAccepto
                 error!("Couldn't remove connection from set {addr}");
             }
         });
+
+        let counter = state.metrics.active_connections.clone();
         let handle = tokio::spawn(async move {
             let _guard = guard;
             let count = {
-                COUNTER.fetch_add(1, Ordering::Relaxed) + 1
+                counter.inc() + 1
             };
             let protocol = if accpt.is_some() {" [TLS]"} else {""};
             debug!("Connection from {:?}{}: {} active connections", &addr, protocol, count);
@@ -353,6 +363,7 @@ fn main() {
         db,
         config,
         server_name,
+        metrics: common::metrics::Metrics::default(),
     });
 
     let tls_acceptor;
