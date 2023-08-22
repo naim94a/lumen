@@ -1,12 +1,16 @@
 # Changelog
 
 ## [Unreleased] - _TBD_
+
+## [v0.3.0] - 2023-08-22
 ### Added
 - This changelog.
 - Support for IDA 8.1+ delete command.
 - Pooling for connections to database.
 - Attempt to cancel immutable database queries if client leaves.
 - Database migrations via Diesel ORM.
+- Support for IDA 8.3+ hello response.
+- Add Metrics for prometheus.
 
 ### Fixed
 - 8K stack size is too small for debug builds.
@@ -22,6 +26,7 @@
 This is Lumen's first tagged release. It contains a few fixes and dependency updates since the initial commit (2020-12-17).
 
 
-[Unreleased]: https://github.com/naim94a/lumen/compare/8b78d0a7d5b3ef4e0f221b07903fa5252174b57b...HEAD
-[v0.2.0]: https://github.com/naim94a/lumen/compare/v0.1.0...8b78d0a7d5b3ef4e0f221b07903fa5252174b57b
+[Unreleased]: https://github.com/naim94a/lumen/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/naim94a/lumen/compare/v0.2.0...v0.3.0
+[v0.2.0]: https://github.com/naim94a/lumen/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/naim94a/lumen/releases/tag/v0.1.0
