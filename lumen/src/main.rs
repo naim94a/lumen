@@ -397,114 +397,100 @@ fn main() {
         metrics: common::metrics::Metrics::default(),
     });
 
-    let subcommand_future = async {
-        match matches.subcommand() {
-            Some(("add_user", sub_m)) => {
-                let username = sub_m.get_one::<String>("username").unwrap();
-                let password = sub_m.get_one::<String>("password").unwrap();
+    match matches.subcommand() {
+        Some(("add_user", sub_m)) => {
+            let username = sub_m.get_one::<String>("username").unwrap();
+            let password = sub_m.get_one::<String>("password").unwrap();
 
-                state.db.register_user(username, password).await;
-            },
-            Some(("change_user_pass", sub_m)) => {
-                let username = sub_m.get_one::<String>("username").unwrap();
-                let new_password = sub_m.get_one::<String>("new_password").unwrap();
-
-                state.db.change_user_password(username, new_password).await;
-            },
-            Some(("remove_user", sub_m)) => {
-                let username = sub_m.get_one::<String>("username").unwrap();
-
-                state.db.remove_user(username).await;
-            },
-            _ => {
-                let tls_acceptor;
-                if state.config.lumina.use_tls.unwrap_or_default() {
-                    let cert_path = &state.config.lumina.tls.as_ref().expect("tls section is missing").server_cert;
-                    let mut crt = match std::fs::read(cert_path) {
-                        Ok(v) => v,
-                        Err(err) => {
-                            error!("failed to read certificate file: {}", err);
-                            exit(1);
-                        }
-                    };
-                    let pkcs_passwd = std::env::var("PKCSPASSWD").unwrap_or_default();
-                    let id = match Identity::from_pkcs12(&crt, &pkcs_passwd) {
-                        Ok(v) => v,
-                        Err(err) => {
-                            error!("failed to parse tls certificate: {}", err);
-                            exit(1);
-                        }
-                    };
-                    let _ = pkcs_passwd;
-                    crt.iter_mut().for_each(|v| *v = 0);
-                    let _ = crt;
-                    let mut accpt = native_tls::TlsAcceptor::builder(id);
-                    accpt.min_protocol_version(Some(native_tls::Protocol::Sslv3));
-                    let accpt = match accpt.build() {
-                        Ok(v) => v,
-                        Err(err) => {
-                            error!("failed to build tls acceptor: {}", err);
-                            exit(1);
-                        },
-                    };
-                    let accpt = tokio_native_tls::TlsAcceptor::from(accpt);
-                    tls_acceptor = Some(accpt);
-                } else {
-                    tls_acceptor = None;
-                }
-
-                let web_handle = if let Some(ref webcfg) = state.config.api_server {
-                    let bind_addr = webcfg.bind_addr;
-                    let state = state.clone();
-                    info!("starting http api server on {:?}", &bind_addr);
-                    Some(rt.spawn(async move {
-                        web::start_webserver(bind_addr, state).await;
-                    }))
-                } else {
-                    None
-                };
-
-                let (exit_signal_tx, exit_signal_rx) = tokio::sync::oneshot::channel::<()>();
-
-                let async_server = async move {
-                    let server = match TcpListener::bind(state.config.lumina.bind_addr).await {
-                        Ok(v) => v,
-                        Err(err) => {
-                            error!("failed to bind server port: {}", err);
-                            exit(1);
-                        },
-                    };
-
-                    info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
-
-                    serve(server, tls_acceptor, state, exit_signal_rx).await;
-                };
-
-                rt.block_on(async {
-                    let server_handle = tokio::task::spawn(async_server);
-                    tokio::signal::ctrl_c().await.unwrap();
-                    debug!("CTRL-C; exiting...");
-                    if let Some(handle) = web_handle {
-                        handle.abort();
-                    }
-                    exit_signal_tx.send(()).unwrap();
-                    server_handle.await.unwrap();
-                });
-                drop(rt);
-                info!("Goodbye.");
-            }
-        }
-    };
-
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build() {
-        Ok(v) => v,
-        Err(err) => {
-            error!("failed to create tokio runtime: {}", err);
-            exit(1);
+            state.db.register_user(username, password);
         },
-    };
+        Some(("change_user_pass", sub_m)) => {
+            let username = sub_m.get_one::<String>("username").unwrap();
+            let new_password = sub_m.get_one::<String>("new_password").unwrap();
 
-    rt.block_on(subcommand_future);
+            state.db.change_user_password(username, new_password);
+        },
+        Some(("remove_user", sub_m)) => {
+            let username = sub_m.get_one::<String>("username").unwrap();
+
+            state.db.remove_user(username);
+        },
+        _ => {
+            let tls_acceptor;
+            if state.config.lumina.use_tls.unwrap_or_default() {
+                let cert_path = &state.config.lumina.tls.as_ref().expect("tls section is missing").server_cert;
+                let mut crt = match std::fs::read(cert_path) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        error!("failed to read certificate file: {}", err);
+                        exit(1);
+                    }
+                };
+                let pkcs_passwd = std::env::var("PKCSPASSWD").unwrap_or_default();
+                let id = match Identity::from_pkcs12(&crt, &pkcs_passwd) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        error!("failed to parse tls certificate: {}", err);
+                        exit(1);
+                    }
+                };
+                let _ = pkcs_passwd;
+                crt.iter_mut().for_each(|v| *v = 0);
+                let _ = crt;
+                let mut accpt = native_tls::TlsAcceptor::builder(id);
+                accpt.min_protocol_version(Some(native_tls::Protocol::Sslv3));
+                let accpt = match accpt.build() {
+                    Ok(v) => v,
+                    Err(err) => {
+                        error!("failed to build tls acceptor: {}", err);
+                        exit(1);
+                    },
+                };
+                let accpt = tokio_native_tls::TlsAcceptor::from(accpt);
+                tls_acceptor = Some(accpt);
+            } else {
+                tls_acceptor = None;
+            }
+
+            let web_handle = if let Some(ref webcfg) = state.config.api_server {
+                let bind_addr = webcfg.bind_addr;
+                let state = state.clone();
+                info!("starting http api server on {:?}", &bind_addr);
+                Some(rt.spawn(async move {
+                    web::start_webserver(bind_addr, state).await;
+                }))
+            } else {
+                None
+            };
+
+            let (exit_signal_tx, exit_signal_rx) = tokio::sync::oneshot::channel::<()>();
+
+            let async_server = async move {
+                let server = match TcpListener::bind(state.config.lumina.bind_addr).await {
+                    Ok(v) => v,
+                    Err(err) => {
+                        error!("failed to bind server port: {}", err);
+                        exit(1);
+                    },
+                };
+
+                info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
+
+                serve(server, tls_acceptor, state, exit_signal_rx).await;
+            };
+
+            rt.block_on(async {
+                let server_handle = tokio::task::spawn(async_server);
+                tokio::signal::ctrl_c().await.unwrap();
+                debug!("CTRL-C; exiting...");
+                if let Some(handle) = web_handle {
+                    handle.abort();
+                }
+                exit_signal_tx.send(()).unwrap();
+                server_handle.await.unwrap();
+            });
+            drop(rt);
+            info!("Goodbye.");
+        }
+    }
 }
