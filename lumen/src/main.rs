@@ -212,6 +212,13 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
             return Ok(());
         }
     }
+    else {
+        rpc::RpcMessage::Fail(rpc::RpcFail {
+            code: 1,
+            message: &format!("{server_name}: username and password should be specified."),
+        }).async_write(&mut stream).await?;
+        return Ok(());
+    }
 
     let resp = match hello.protocol_version {
         0..=4 => rpc::RpcMessage::Ok(()),
