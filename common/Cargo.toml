@@ -22,6 +22,7 @@ diesel = {version = "2.1", optional = true, default-features = false, features =
 diesel-async = {version = "0.3", optional = true, features = ["postgres", "bb8"]}
 anyhow = "1.0"
 prometheus-client = "0.21.2"
+bcrypt = "0.15.0"
 
 [features]
 default = ["web", "db"]
