@@ -1,6 +1,14 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    auth_users (id) {
+        id -> Int4,
+        username -> Varchar,
+        password_hash -> Varchar,
+    }
+}
+
+diesel::table! {
     dbs (id) {
         id -> Int4,
         file_path -> Nullable<Varchar>,
@@ -46,6 +54,7 @@ diesel::joinable!(dbs -> users (user_id));
 diesel::joinable!(funcs -> dbs (db_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    auth_users,
     dbs,
     files,
     funcs,

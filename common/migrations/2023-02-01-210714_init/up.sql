@@ -37,3 +37,9 @@ CREATE TABLE IF NOT EXISTS funcs (
 CREATE UNIQUE INDEX IF NOT EXISTS funcs_db ON funcs(chksum, db_id);
 CREATE INDEX IF NOT EXISTS funcs_ranking ON funcs(chksum,rank);
 CREATE INDEX IF NOT EXISTS func_chksum ON funcs(chksum);
+
+CREATE TABLE IF NOT EXISTS auth_users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(32) NOT NULL UNIQUE,
+    password_hash VARCHAR(128) NOT NULL
+);

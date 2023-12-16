@@ -200,14 +200,24 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, m
     }).inc();
 
     if let Some(ref creds) = creds {
-        if creds.username != "guest" {
+
+        let auth_state = state.db.auth_user(creds.username, creds.password).await;
+
+        if !auth_state.is_ok() || !auth_state.unwrap() {
             // Only allow "guest" to connect for now.
             rpc::RpcMessage::Fail(rpc::RpcFail {
                 code: 1,
-                message: &format!("{server_name}: invalid username or password. Try logging in with `guest` instead."),
+                message: &format!("{server_name}: invalid username or password."),
             }).async_write(&mut stream).await?;
             return Ok(());
         }
+    }
+    else {
+        rpc::RpcMessage::Fail(rpc::RpcFail {
+            code: 1,
+            message: &format!("{server_name}: username and password should be specified."),
+        }).async_write(&mut stream).await?;
+        return Ok(());
     }
 
     let resp = match hello.protocol_version {
@@ -329,6 +339,33 @@ fn main() {
                 .default_value("config.toml")
                 .help("Configuration file path")
         )
+        .subcommand(
+            clap::Command::new("add_user")
+            .about("Adds a new user")
+            .arg(Arg::new("username")
+                .help("The username for the new user")
+                .required(true))
+            .arg(Arg::new("password")
+                .help("The password for the new user")
+                .required(true))
+        )
+        .subcommand(
+            clap::Command::new("change_user_pass")
+            .about("Changes a user's password")
+            .arg(Arg::new("username")
+                .help("The username of the user")
+                .required(true))
+            .arg(Arg::new("new_password")
+                .help("The new password for the user")
+                .required(true))
+        )
+        .subcommand(
+            clap::Command::new("remove_user")
+            .about("Removes user")
+            .arg(Arg::new("username")
+                .help("The username of the user")
+                .required(true))
+        )
         .get_matches();
 
     let config = {
@@ -347,7 +384,7 @@ fn main() {
             exit(1);
         },
     };
-    
+
     let db = rt.block_on(async {
         match Database::open(&config.database).await {
             Ok(v) => v,
@@ -367,8 +404,46 @@ fn main() {
         metrics: common::metrics::Metrics::default(),
     });
 
-    let tls_acceptor;
+    let subcommand_future = async {
+        match matches.subcommand() {
+            Some(("add_user", sub_m)) => {
+                let username = sub_m.get_one::<String>("username").unwrap();
+                let password = sub_m.get_one::<String>("password").unwrap();
 
+                match state.db.register_user(username, password).await {
+                    Ok(_) => println!("User added successfully"),
+                    Err(e) => eprintln!("Error adding user: {}", e),
+                }
+                exit(0);
+            },
+            Some(("change_user_pass", sub_m)) => {
+                let username = sub_m.get_one::<String>("username").unwrap();
+                let new_password = sub_m.get_one::<String>("new_password").unwrap();
+
+                match state.db.change_user_password(username, new_password).await {
+                    Ok(_) => println!("User password changed successfully"),
+                    Err(e) => eprintln!("Error changing user password: {}", e),
+                }
+                exit(0);
+            },
+            Some(("remove_user", sub_m)) => {
+                let username = sub_m.get_one::<String>("username").unwrap();
+
+                match state.db.remove_user(username).await {
+                    Ok(_) => println!("User removed successfully"),
+                    Err(e) => eprintln!("Error removing user: {}", e),
+                }
+                exit(0);
+            },
+            _ => {
+                
+            }
+        }
+    };
+
+    rt.block_on(subcommand_future);
+
+    let tls_acceptor;
     if state.config.lumina.use_tls.unwrap_or_default() {
         let cert_path = &state.config.lumina.tls.as_ref().expect("tls section is missing").server_cert;
         let mut crt = match std::fs::read(cert_path) {
@@ -427,7 +502,7 @@ fn main() {
         };
 
         info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
-    
+
         serve(server, tls_acceptor, state, exit_signal_rx).await;
     };
 

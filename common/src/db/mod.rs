@@ -3,11 +3,12 @@ use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
 use tokio_postgres::{tls::MakeTlsConnect, Socket, NoTls};
 use std::{collections::HashMap};
+use bcrypt::{hash, verify, DEFAULT_COST};
 use crate::async_drop::{AsyncDropper, AsyncDropGuard};
 mod schema_auto;
 pub mod schema;
 
-use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods, sql_types::{Array, Binary, VarChar, Integer}, query_builder::{QueryFragment, Query}};
+use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods, sql_types::{Array, Binary, VarChar, Integer}, query_builder::{QueryFragment, Query}, result::Error::NotFound};
 use diesel_async::RunQueryDsl;
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
@@ -335,6 +336,76 @@ impl Database {
             .limit(limit)
             .get_results::<(String, i32, Vec<u8>)>(conn).await?;
         Ok(results)
+    }
+
+    pub async fn register_user(&self, username: &str, password: &str) -> Result<(), anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+    
+        // Hash the password
+        let hashed_password = hash(password, DEFAULT_COST)?;
+    
+        // Insert new user
+        diesel::insert_into(schema::auth_users::table)
+            .values((
+                schema::auth_users::username.eq(username),
+                schema::auth_users::password_hash.eq(hashed_password),
+            ))
+            .execute(conn)
+            .await?;
+    
+        Ok(())
+    }
+
+    pub async fn change_user_password(&self, username: &str, new_password: &str) -> Result<(), anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+    
+        // Hash the new password
+        let hashed_password = hash(new_password, DEFAULT_COST)?;
+    
+        // Update the user's password
+        diesel::update(schema::auth_users::table.filter(schema::auth_users::username.eq(username)))
+            .set(schema::auth_users::password_hash.eq(hashed_password))
+            .execute(conn)
+            .await?;
+    
+        Ok(())
+    }
+
+    pub async fn remove_user(&self, username: &str) -> Result<(), anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+    
+        // Execute the delete query
+        diesel::delete(schema::auth_users::table.filter(schema::auth_users::username.eq(username)))
+            .execute(conn)
+            .await?;
+    
+        Ok(())
+    }
+
+    pub async fn auth_user(&self, login: &str, password: &str) -> Result<bool, anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+
+        match schema::auth_users::table
+            .select((schema::auth_users::username, schema::auth_users::password_hash))
+            .filter(schema::auth_users::username.eq(login))
+            .first::<(String, String)>(conn)
+            .await {
+                Ok((_, password_hash)) => {
+                    // If user is found, verify the password
+                    match verify(password, &password_hash) {
+                        Ok(valid) => Ok(valid),
+                        Err(e) => Err(anyhow::Error::new(e)),
+                    }
+                },
+                Err(diesel::result::Error::NotFound) => {
+                    // If user is not found, return false
+                    Ok(false)
+                },
+                Err(e) => {
+                    // For all other errors, return the error
+                    Err(anyhow::Error::new(e))
+                }
+            }
     }
 
     pub async fn get_files_with_func(&self, func: &[u8]) -> Result<Vec<Vec<u8>>, anyhow::Error> {
