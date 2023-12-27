@@ -118,6 +118,8 @@ pub enum RpcMessage<'a> {
     PushMetadataResult(PushMetadataResult<'a>),
     DelHistory(DelHistory<'a>),
     DelHistoryResult(DelHistoryResult),
+    GetFuncHistories(GetFuncHistories<'a>),
+    GetFuncHistoriesResult(GetFuncHistoriesResult<'a>),
     HelloResult(HelloResult<'a>),
 }
 
@@ -142,6 +144,8 @@ impl<'a> serde::Serialize for RpcMessage<'a> {
             RpcMessage::PushMetadataResult(msg) => tuple.serialize_element(msg)?,
             RpcMessage::DelHistory(msg) => tuple.serialize_element(msg)?,
             RpcMessage::DelHistoryResult(msg) => tuple.serialize_element(msg)?,
+            RpcMessage::GetFuncHistories(msg) => tuple.serialize_element(msg)?,
+            RpcMessage::GetFuncHistoriesResult(msg) => tuple.serialize_element(msg)?,
             RpcMessage::HelloResult(msg) => tuple.serialize_element(msg)?,
         }
 
@@ -195,6 +199,8 @@ impl<'a> RpcMessage<'a> {
             0x11 => RpcMessage::PushMetadataResult(Self::deserialize_check(payload)?),
             0x18 => RpcMessage::DelHistory(Self::deserialize_check(payload)?),
             0x19 => RpcMessage::DelHistoryResult(Self::deserialize_check(payload)?),
+            0x2f => RpcMessage::GetFuncHistories(Self::deserialize_check(payload)?),
+            0x30 => RpcMessage::GetFuncHistoriesResult(Self::deserialize_check(payload)?),
             0x31 => RpcMessage::HelloResult(Self::deserialize_check(payload)?),
             _ => {
                 trace!("got invalid message type '{:02x}'", msg_type);
@@ -228,6 +234,8 @@ impl<'a> RpcMessage<'a> {
             PushMetadataResult(_) => 0x11,
             DelHistory(_) => 0x18,
             DelHistoryResult(_) => 0x19,
+            GetFuncHistories(_) => 0x2f,
+            GetFuncHistoriesResult(_) => 0x30,
             HelloResult(_) => 0x31,
         }
     }

@@ -162,6 +162,55 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
                 }).async_write(&mut stream).await?;
             }
         },
+        RpcMessage::GetFuncHistories(req) => {
+            info!("{req:?}");
+
+            let mut statuses = vec![];
+            let mut res = vec![];
+            for chksum in req.funcs.iter().map(|v| v.mb_hash) {
+                let history = match db.get_func_histories(chksum).await {
+                    Ok(v) => v,
+                    Err(err) => {
+                        error!("failed to get function histories: {err:?}");
+                        RpcMessage::Fail(rpc::RpcFail {
+                            code: 3,
+                            message: &format!("{server_name}: db error, please try again later."),
+                        }).async_write(&mut stream).await?;
+                        return Ok(());
+                    },
+                };
+                let status = !history.is_empty() as u32;
+                statuses.push(status);
+                if history.is_empty() {
+                    continue;
+                }
+                let log = history.into_iter().map(|(updated, name, metadata)| {
+                    rpc::FunctionHistory {
+                        unk0: 0,
+                        unk1: 0,
+                        name: Cow::Owned(name),
+                        metadata: Cow::Owned(metadata),
+                        timestamp: updated.unix_timestamp() as u64,
+                        author_idx: 0,
+                        idb_path_idx: 0,
+                    }
+                }).collect::<Vec<_>>();
+                res.push(rpc::FunctionHistories {
+                    log: Cow::Owned(log),
+                });
+            }
+
+            trace!("returning {} histories", res.len());
+
+            RpcMessage::GetFuncHistoriesResult(rpc::GetFuncHistoriesResult {
+                status: statuses.into(),
+                funcs: Cow::Owned(res),
+                users: vec![].into(),
+                dbs: vec![].into(),
+            })
+            .async_write(&mut stream)
+            .await?;
+        },
         _ => {
             RpcMessage::Fail(rpc::RpcFail{code: 0, message: &format!("{server_name}: invalid data.\n")}).async_write(&mut stream).await?;
         }
@@ -347,7 +396,7 @@ fn main() {
             exit(1);
         },
     };
-    
+
     let db = rt.block_on(async {
         match Database::open(&config.database).await {
             Ok(v) => v,
@@ -427,7 +476,7 @@ fn main() {
         };
 
         info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
-    
+
         serve(server, tls_acceptor, state, exit_signal_rx).await;
     };
 

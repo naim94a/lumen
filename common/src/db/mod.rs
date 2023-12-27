@@ -1,8 +1,9 @@
 use log::*;
 use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
+use time::OffsetDateTime;
 use tokio_postgres::{tls::MakeTlsConnect, Socket, NoTls};
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use crate::async_drop::{AsyncDropper, AsyncDropGuard};
 mod schema_auto;
 pub mod schema;
@@ -29,7 +30,7 @@ pub struct FunctionInfo {
 pub struct DbStats {
     unique_lics: i32,
     unique_hosts_per_lic: i32,
-    
+
     unique_funcs: i32,
     total_funcs: i32,
 
@@ -49,9 +50,9 @@ impl Database {
         let (dropper, worker) = AsyncDropper::new();
         tokio::task::spawn(worker);
 
-        let diesel =  Self::make_bb8_pool(connection_string, tls_connector.clone()).await?;
+        let diesel = Self::make_bb8_pool(connection_string, tls_connector.clone()).await?;
 
-        Ok(Database{
+        Ok(Database {
             tls_connector,
             dropper,
             diesel,
@@ -80,7 +81,7 @@ impl Database {
     async fn make_bb8_pool(db_url: &str, tls: Option<MakeTlsConnector>) -> Result<diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection>, anyhow::Error> {
         let cfg = diesel_async::pooled_connection::AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new_with_setup(db_url, move |db_url| {
             let tls = tls.clone();
-            Box::pin( async move {
+            Box::pin(async move {
                 if let Some(tls) = tls {
                     Self::make_pg_client(db_url, tls).await
                 } else {
@@ -92,7 +93,7 @@ impl Database {
         let pool = diesel_async::pooled_connection::bb8::Pool::builder()
             .min_idle(Some(1))
             .build(cfg)
-                .await?;
+            .await?;
         Ok(pool)
     }
 
@@ -273,7 +274,7 @@ impl Database {
         const PUSH_FUNC_CHUNK_SIZE: usize = 3000;
 
         let db_id = self.get_or_create_db(user, funcs).await?;
-        
+
         let mut rows = Vec::with_capacity(funcs.funcs.len().min(PUSH_FUNC_CHUNK_SIZE));
         let mut is_new = Vec::with_capacity(funcs.funcs.len());
         let conn = &mut self.diesel.get().await?;
@@ -375,10 +376,28 @@ impl Database {
         let rows_modified = diesel::delete(funcs.filter(chksum.eq_any(&chksums)))
             .execute(conn)
             .await?;
-        
+
         debug!("deleted {rows_modified} rows");
 
         Ok(())
+    }
+
+    pub async fn get_func_histories(&self, chksum: &[u8]) -> Result<Vec<(OffsetDateTime, String, Vec<u8>)>, anyhow::Error> {
+        let conn = &mut self.diesel.get().await?;
+        let rows = schema::funcs::table
+            .select((
+                schema::funcs::update_dt.assume_not_null(),
+                schema::funcs::name,
+                schema::funcs::metadata.assume_not_null()
+            ))
+            .limit(15)
+            .order_by(schema::funcs::update_dt.desc())
+            .filter(
+                schema::funcs::chksum.eq(chksum)
+            )
+            .get_results::<(time::OffsetDateTime, String, Vec<u8>)>(conn)
+            .await?;
+        Ok(rows)
     }
 }
 
@@ -390,8 +409,8 @@ impl<'a> QueryFragment<diesel::pg::Pg> for BestMds<'a> {
             select chksum,MAX(rank) as maxrank from funcs f1
             WHERE chksum = ANY("#);
         pass.push_bind_param::<Array<Binary>, _>(&self.0)?;
-        pass.push_sql(r#") 
-            GROUP BY chksum 
+        pass.push_sql(r#")
+            GROUP BY chksum
         )
         SELECT f2.name,f2.len,f2.metadata,f2.chksum FROM best
         LEFT JOIN funcs f2 ON (best.chksum=f2.chksum AND best.maxrank=f2.rank)"#);

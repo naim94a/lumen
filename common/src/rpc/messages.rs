@@ -27,7 +27,7 @@ pub struct RpcHello<'a> {
     pub unk2: u32,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PullMetadataFunc<'a> {
     pub unk0: u32,
     pub mb_hash: &'a [u8],
@@ -115,4 +115,37 @@ pub struct HelloResult<'a> {
     pub unk4: u32,
     pub unk5: u64,
     pub unk6: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetFuncHistories<'a> {
+    #[serde(borrow)]
+    pub funcs: Cow<'a, [PullMetadataFunc<'a>]>,
+    pub unk0: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FunctionHistory<'a> {
+    pub unk0: u64,
+    pub unk1: u64,
+    pub name: Cow<'a, str>,
+    pub metadata: Cow<'a, [u8]>,
+    pub timestamp: u64,
+    pub author_idx: u32,
+    pub idb_path_idx: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FunctionHistories<'a> {
+    #[serde(borrow)]
+    pub log: Cow<'a, [FunctionHistory<'a>]>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetFuncHistoriesResult<'a> {
+    pub status: Cow<'a, [u32]>,
+    #[serde(borrow)]
+    pub funcs: Cow<'a, [FunctionHistories<'a>]>,
+    pub users: Cow<'a, [Cow<'a, str>]>,
+    pub dbs: Cow<'a, [Cow<'a, str>]>,
 }
