@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased] - _TBD_
+### Added
+- Implemented the function histories command.
 
 ## [v0.3.0] - 2023-08-22
 ### Added
