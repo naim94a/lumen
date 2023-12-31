@@ -14,6 +14,10 @@ pub struct LuminaServer {
     pub tls: Option<TlsIdentity>,
     pub server_name: Option<String>,
     pub allow_deletes: Option<bool>,
+
+    /// limit of function histories to return per function.
+    /// `None`, or `Some(0)` will disable the feature on the server.
+    pub get_history_limit: Option<u32>,
 }
 
 #[derive(Deserialize)]

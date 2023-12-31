@@ -8,6 +8,8 @@ server_name = "lumen"
 
 # Allow clients to delete metadata from the database?
 allow_deletes = false
+# How many function histories should we return? 0=Disabled.
+get_history_limit = 50
 
 # only required when `use_tls` is set to true.
 [lumina.tls]

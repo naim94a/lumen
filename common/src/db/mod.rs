@@ -382,15 +382,15 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_func_histories(&self, chksum: &[u8]) -> Result<Vec<(OffsetDateTime, String, Vec<u8>)>, anyhow::Error> {
+    pub async fn get_func_histories(&self, chksum: &[u8], limit: u32) -> Result<Vec<(OffsetDateTime, String, Vec<u8>)>, anyhow::Error> {
         let conn = &mut self.diesel.get().await?;
-        let rows = schema::funcs::table
+        let rows = &schema::funcs::table
             .select((
                 schema::funcs::update_dt.assume_not_null(),
                 schema::funcs::name,
                 schema::funcs::metadata.assume_not_null()
-            ))
-            .limit(15)
+            ));
+        let rows = rows.limit(limit as i64)
             .order_by(schema::funcs::update_dt.desc())
             .filter(
                 schema::funcs::chksum.eq(chksum)

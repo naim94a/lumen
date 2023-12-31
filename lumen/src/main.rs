@@ -163,12 +163,20 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(state: &Share
             }
         },
         RpcMessage::GetFuncHistories(req) => {
-            info!("{req:?}");
+            let limit = state.config.lumina.get_history_limit.unwrap_or(0);
+
+            if limit == 0 {
+                RpcMessage::Fail(rpc::RpcFail {
+                    code: 4,
+                    message: &format!("{server_name}: function histories are disabled on this server."),
+                }).async_write(&mut stream).await?;
+                return Ok(());
+            }
 
             let mut statuses = vec![];
             let mut res = vec![];
             for chksum in req.funcs.iter().map(|v| v.mb_hash) {
-                let history = match db.get_func_histories(chksum).await {
+                let history = match db.get_func_histories(chksum, limit).await {
                     Ok(v) => v,
                     Err(err) => {
                         error!("failed to get function histories: {err:?}");
