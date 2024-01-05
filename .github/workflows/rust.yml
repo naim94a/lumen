@@ -35,7 +35,10 @@ jobs:
         toolchain: stable
         override: true
         profile: minimal
+        components: rustfmt
     - name: Build
       run: cargo build
     - name: Run tests
       run: cargo test
+    - name: rustfmt
+      run: cargo fmt --all -- --check
