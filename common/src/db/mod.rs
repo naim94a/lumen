@@ -9,7 +9,7 @@ mod schema_auto;
 pub mod schema;
 
 use diesel::{upsert::excluded, ExpressionMethods, QueryDsl, NullableExpressionMethods, sql_types::{Array, Binary, VarChar, Integer}, query_builder::{QueryFragment, Query}};
-use diesel_async::RunQueryDsl;
+use diesel_async::{RunQueryDsl, pooled_connection::ManagerConfig};
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
@@ -79,7 +79,8 @@ impl Database {
     }
 
     async fn make_bb8_pool(db_url: &str, tls: Option<MakeTlsConnector>) -> Result<diesel_async::pooled_connection::bb8::Pool<diesel_async::AsyncPgConnection>, anyhow::Error> {
-        let cfg = diesel_async::pooled_connection::AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new_with_setup(db_url, move |db_url| {
+        let mut config = ManagerConfig::default();
+        config.custom_setup = Box::new(move |db_url| {
             let tls = tls.clone();
             Box::pin(async move {
                 if let Some(tls) = tls {
@@ -89,6 +90,7 @@ impl Database {
                 }
             })
         });
+        let cfg = diesel_async::pooled_connection::AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new_with_config(db_url, config);
 
         let pool = diesel_async::pooled_connection::bb8::Pool::builder()
             .min_idle(Some(1))
