@@ -1,6 +1,10 @@
-use crate::async_drop::{AsyncDropGuard, AsyncDropper};
+use crate::{
+    async_drop::{AsyncDropGuard, AsyncDropper},
+    db::schema::Creds,
+};
 use log::*;
 use postgres_native_tls::MakeTlsConnector;
+
 use serde::Serialize;
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -15,6 +19,8 @@ use diesel::{
     ExpressionMethods, NullableExpressionMethods, QueryDsl,
 };
 use diesel_async::{pooled_connection::ManagerConfig, RunQueryDsl};
+
+use self::schema::creds;
 
 pub type DynConfig = dyn crate::config::HasConfig + Send + Sync;
 
@@ -445,6 +451,73 @@ impl Database {
             .get_results::<(time::OffsetDateTime, String, Vec<u8>)>(conn)
             .await?;
         Ok(rows)
+    }
+
+    pub async fn get_users(&self) -> Result<Vec<(i32, String, String, bool, bool)>, anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+
+        creds::table
+            .select((
+                creds::id,
+                creds::username,
+                creds::email,
+                creds::is_admin,
+                creds::passwd_hash.is_not_null(),
+            ))
+            .get_results::<(i32, String, String, bool, bool)>(db)
+            .await
+            .map_err(|v| v.into())
+    }
+
+    pub async fn delete_user(&self, username: &str) -> Result<(), anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+
+        let changes =
+            diesel::delete(creds::table.filter(creds::username.eq(username))).execute(db).await?;
+        if changes != 1 {
+            return Err(anyhow::anyhow!("expected a single row deletion, got {changes}"));
+        }
+        Ok(())
+    }
+
+    pub async fn set_password(&self, username: &str, password: &str) -> Result<(), anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+
+        let salt = vec![0u8; 2];
+        let hash = vec![0u8; 32];
+        let iters = 10_000;
+
+        let r = diesel::update(creds::table.filter(creds::username.eq(username)))
+            .set(creds::passwd_iters.eq(iters))
+            .execute(db)
+            .await?;
+        if r != 1 {
+            return Err(anyhow::anyhow!(
+                "failed to set user's password. expected a single row change."
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn add_user(
+        &self, username: &str, email: &str, is_admin: bool,
+    ) -> Result<u32, anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+
+        diesel::insert_into(creds::table)
+            .values(&Creds {
+                username: username.into(),
+                email: email.into(),
+                passwd_salt: None,
+                passwd_iters: 10_000,
+                passwd_hash: None,
+                is_admin,
+            })
+            .returning(creds::id)
+            .get_result::<i32>(db)
+            .await
+            .map_err(|v| v.into())
+            .map(|v| v as u32)
     }
 }
 

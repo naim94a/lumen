@@ -16,3 +16,4 @@ tokio-native-tls = "0.3"
 native-tls = {version = "0.2"}
 warp = "0.3"
 prometheus-client = "0.22.0"
+rpassword = "7.3.1"
