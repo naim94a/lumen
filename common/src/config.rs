@@ -1,6 +1,6 @@
 use serde::Deserialize;
-use toml::from_str;
 use std::{net::SocketAddr, path::PathBuf};
+use toml::from_str;
 
 #[derive(Deserialize)]
 pub struct TlsIdentity {

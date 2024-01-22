@@ -35,6 +35,8 @@ jobs:
         toolchain: stable
         override: true
         profile: minimal
+    - name: Code Formatting
+      run: cargo fmt --check
     - name: Build
       run: cargo build
     - name: Run tests

@@ -1,0 +1,5 @@
+edition = "2021"
+fn_params_layout = "Compressed"
+match_block_trailing_comma = true
+newline_style = "Unix"
+use_small_heuristics = "Max"

@@ -45,9 +45,4 @@ diesel::joinable!(dbs -> files (file_id));
 diesel::joinable!(dbs -> users (user_id));
 diesel::joinable!(funcs -> dbs (db_id));
 
-diesel::allow_tables_to_appear_in_same_query!(
-    dbs,
-    files,
-    funcs,
-    users,
-);
+diesel::allow_tables_to_appear_in_same_query!(dbs, files, funcs, users,);

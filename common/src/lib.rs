@@ -3,13 +3,13 @@
 
 use std::fmt::Write;
 
-pub mod db;
+pub mod async_drop;
 pub mod config;
+pub mod db;
 pub mod md;
+pub mod metrics;
 pub mod rpc;
 pub mod web;
-pub mod async_drop;
-pub mod metrics;
 
 pub struct SharedState_ {
     pub db: db::Database,
@@ -33,7 +33,11 @@ pub fn make_pretty_hex(data: &[u8]) -> String {
         }
 
         let _ = write!(&mut output, " | ");
-        for ch in chunk.iter().chain(std::iter::repeat(&b' ').take(padding)).map(|&v| std::char::from_u32(v as u32).unwrap_or('.')) {
+        for ch in chunk
+            .iter()
+            .chain(std::iter::repeat(&b' ').take(padding))
+            .map(|&v| std::char::from_u32(v as u32).unwrap_or('.'))
+        {
             if !ch.is_ascii_graphic() {
                 output.push('.');
             } else {

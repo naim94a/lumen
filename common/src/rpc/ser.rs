@@ -1,15 +1,13 @@
-use std::io::Write;
-use serde::{ser, Serialize, ser::Impossible};
 use super::Error;
+use serde::{ser, ser::Impossible, Serialize};
+use std::io::Write;
 
 struct Serializer<W: Write> {
     output: W,
 }
 
 pub fn to_writer<T: Serialize, W: Write>(v: &T, w: W) -> Result<(), Error> {
-    let mut serializer = Serializer {
-        output: w,
-    };
+    let mut serializer = Serializer { output: w };
     v.serialize(&mut serializer)?;
     Ok(())
 }
@@ -132,15 +130,21 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         unreachable!()
     }
 
-    fn serialize_unit_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit_variant(
+        self, _name: &'static str, _variant_index: u32, _variant: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
         unreachable!()
     }
 
-    fn serialize_newtype_struct<T: ?Sized + Serialize>(self, _name: &'static str, _value: &T) -> Result<Self::Ok, Self::Error> {
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self, _name: &'static str, _value: &T,
+    ) -> Result<Self::Ok, Self::Error> {
         unreachable!()
     }
 
-    fn serialize_newtype_variant<T: ?Sized + Serialize>(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _value: &T) -> Result<Self::Ok, Self::Error> {
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
+        self, _name: &'static str, _variant_index: u32, _variant: &'static str, _value: &T,
+    ) -> Result<Self::Ok, Self::Error> {
         unreachable!()
     }
 
@@ -154,11 +158,15 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         Ok(self)
     }
 
-    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeTupleStruct, Self::Error> {
+    fn serialize_tuple_struct(
+        self, _name: &'static str, _len: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         unreachable!();
     }
 
-    fn serialize_tuple_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeTupleVariant, Self::Error> {
+    fn serialize_tuple_variant(
+        self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         unreachable!()
     }
 
@@ -166,12 +174,16 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
         unreachable!()
     }
 
-    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct, Self::Error> {
+    fn serialize_struct(
+        self, _name: &'static str, _len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
         // structs will simply be flattened
         Ok(self)
     }
 
-    fn serialize_struct_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize) -> Result<Self::SerializeStructVariant, Self::Error> {
+    fn serialize_struct_variant(
+        self, _name: &'static str, _variant_index: u32, _variant: &'static str, _len: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
         unreachable!()
     }
 }
@@ -206,7 +218,9 @@ impl<'a, W: Write> ser::SerializeStruct for &'a mut Serializer<W> {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, _key: &'static str, value: &T) -> Result<(), Self::Error> {
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self, _key: &'static str, value: &T,
+    ) -> Result<(), Self::Error> {
         // struct names have no meaning
         value.serialize(&mut **self)
     }
