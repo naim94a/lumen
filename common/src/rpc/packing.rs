@@ -3,14 +3,16 @@
 pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
     let bytes = v.to_le_bytes();
     match v {
-        0..=0x7f => { // 0..0XXXXXXX (7 bits)
+        0..=0x7f => {
+            // 0..0XXXXXXX (7 bits)
             if buf.is_empty() {
                 return 0;
             }
             buf[0] = bytes[0];
             1
         },
-        0x80..=0x3fff => { // 10AAAAAA..BBBBBBBB (14 bits)
+        0x80..=0x3fff => {
+            // 10AAAAAA..BBBBBBBB (14 bits)
             if buf.len() < 2 {
                 return 0;
             }
@@ -18,7 +20,8 @@ pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
             buf[1] = bytes[0];
             2
         },
-        0x4000..=0x1fffff => { // 11000000_AAAAAAAA_BBBBBBBB_CCCCCCCC (24 bits)
+        0x4000..=0x1fffff => {
+            // 11000000_AAAAAAAA_BBBBBBBB_CCCCCCCC (24 bits)
             if buf.len() < 3 {
                 return 0;
             }
@@ -28,7 +31,8 @@ pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
             buf[3] = bytes[0];
             4
         },
-        0x200000..=u32::MAX => { // 11111111_AAAAAAAA_BBBBBBBB_CCCCCCCC_DDDDDDDD (32 bits)
+        0x200000..=u32::MAX => {
+            // 11111111_AAAAAAAA_BBBBBBBB_CCCCCCCC_DDDDDDDD (32 bits)
             if buf.len() < 5 {
                 return 0;
             }
@@ -38,7 +42,7 @@ pub fn pack_dd(v: u32, buf: &mut [u8]) -> usize {
             buf[3] = bytes[1];
             buf[4] = bytes[0];
             5
-        }
+        },
     }
 }
 
@@ -51,11 +55,13 @@ pub fn unpack_dd(buf: &[u8]) -> (u32, usize) {
     let msb = buf[0];
     let mut val = [0u8; 4];
 
-    if msb & 0x80 == 0 { // 0......
+    if msb & 0x80 == 0 {
+        // 0......
         val[0] = msb;
         return (u32::from_le_bytes(val), 1);
     }
-    if msb & 0x40 == 0 { // 10....../0x80
+    if msb & 0x40 == 0 {
+        // 10....../0x80
         if buf.len() < 2 {
             return (0, 0);
         }
@@ -63,7 +69,8 @@ pub fn unpack_dd(buf: &[u8]) -> (u32, usize) {
         val[0] = buf[1];
         return (u32::from_le_bytes(val), 2);
     }
-    if msb & 0x20 == 0 { // 110...../0xC0
+    if msb & 0x20 == 0 {
+        // 110...../0xC0
         if buf.len() < 4 {
             return (0, 0);
         }

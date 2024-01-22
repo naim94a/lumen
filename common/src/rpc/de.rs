@@ -1,6 +1,6 @@
-use serde::Deserialize;
-use serde::de::{self, DeserializeSeed, SeqAccess, Visitor};
 use super::Error;
+use serde::de::{self, DeserializeSeed, SeqAccess, Visitor};
+use serde::Deserialize;
 
 struct Deserializer<'de> {
     input: &'de [u8],
@@ -8,11 +8,9 @@ struct Deserializer<'de> {
 
 impl<'de> Deserializer<'de> {
     fn from_bytes(b: &'de [u8]) -> Self {
-        Self {
-            input: b,
-        }
+        Self { input: b }
     }
-    
+
     fn unpack_dd(&mut self) -> Result<u32, Error> {
         let (v, len) = super::packing::unpack_dd(self.input);
         if len == 0 {
@@ -28,7 +26,7 @@ impl<'de> Deserializer<'de> {
         let b = self.unpack_dd()? as u64;
         Ok((a << 32) | b)
     }
-    
+
     fn unpack_var_bytes(&mut self) -> Result<&'de [u8], Error> {
         let bytes = self.unpack_dd()? as usize;
         if bytes > self.input.len() {
@@ -41,9 +39,13 @@ impl<'de> Deserializer<'de> {
 
         Ok(payload)
     }
-    
+
     fn unpack_cstr(&mut self) -> Result<&'de str, Error> {
-        let len = self.input.iter().enumerate().find_map(|(idx, &v)| if v == 0 { Some(idx) } else { None });
+        let len = self
+            .input
+            .iter()
+            .enumerate()
+            .find_map(|(idx, &v)| if v == 0 { Some(idx) } else { None });
         let len = match len {
             Some(v) => v,
             None => return Err(Error::UnexpectedEof),
@@ -52,7 +54,7 @@ impl<'de> Deserializer<'de> {
             Ok(v) => v,
             Err(err) => {
                 return Err(err.into());
-            }
+            },
         };
         self.input = &self.input[len + 1..];
         Ok(res)
@@ -97,11 +99,8 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         let len = self.unpack_dd()?;
-        
-        visitor.visit_seq(Access {
-            len: len as usize,
-            de: &mut *self,
-        })
+
+        visitor.visit_seq(Access { len: len as usize, de: &mut *self })
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -112,19 +111,22 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         let v = self.unpack_var_bytes()?;
         visitor.visit_borrowed_bytes(v)
     }
-    
-    fn deserialize_tuple<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_seq(Access {
-            len,
-            de: &mut *self,
-        })
+
+    fn deserialize_tuple<V: Visitor<'de>>(
+        self, len: usize, visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        visitor.visit_seq(Access { len, de: &mut *self })
     }
 
-    fn deserialize_tuple_struct<V: Visitor<'de>>(self, _name: &'static str, len: usize, visitor: V) -> Result<V::Value, Self::Error> {
+    fn deserialize_tuple_struct<V: Visitor<'de>>(
+        self, _name: &'static str, len: usize, visitor: V,
+    ) -> Result<V::Value, Self::Error> {
         self.deserialize_tuple(len, visitor)
     }
 
-    fn deserialize_struct<V: Visitor<'de>>(self, name: &'static str, fields: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error> {
+    fn deserialize_struct<V: Visitor<'de>>(
+        self, name: &'static str, fields: &'static [&'static str], visitor: V,
+    ) -> Result<V::Value, Self::Error> {
         self.deserialize_tuple_struct(name, fields.len(), visitor)
     }
 
@@ -141,8 +143,10 @@ struct Access<'a, 'de> {
 
 impl<'de, 'a> SeqAccess<'a> for Access<'de, 'a> {
     type Error = Error;
-    
-    fn next_element_seed<T: DeserializeSeed<'a>>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error> {
+
+    fn next_element_seed<T: DeserializeSeed<'a>>(
+        &mut self, seed: T,
+    ) -> Result<Option<T::Value>, Self::Error> {
         if self.len > 0 {
             self.len -= 1;
 

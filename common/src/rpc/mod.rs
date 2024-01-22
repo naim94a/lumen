@@ -1,9 +1,9 @@
-use tokio::io::{AsyncWriteExt, AsyncWrite, AsyncRead, AsyncReadExt};
 use log::*;
-mod ser;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub(crate) mod de;
 mod messages;
 mod packing;
+mod ser;
 use serde::Serializer;
 
 pub use messages::*;
@@ -57,9 +57,9 @@ impl From<std::collections::TryReserveError> for Error {
 
 fn get_code_maxlen(code: u8) -> usize {
     match code {
-        0x0e => 50 * 1024 * 1024, // PullMD: 50 MiB
+        0x0e => 50 * 1024 * 1024,  // PullMD: 50 MiB
         0x10 => 200 * 1024 * 1024, // PushMD: 200 MiB
-        _ => 1024 * 50, // otherwise 50K
+        _ => 1024 * 50,            // otherwise 50K
     }
 }
 
@@ -76,14 +76,22 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
 
     let buf_len = u32::from_be_bytes(buf_len) as usize;
     if buf_len < 4 {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "payload size is too small").into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "payload size is too small",
+        )
+        .into());
     }
 
     let max_len = get_code_maxlen(code);
 
     if buf_len > max_len {
         info!("maxium size exceeded: code={}: max={}; req={}", code, max_len, buf_len);
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request length exceeded maximum limit").into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "request length exceeded maximum limit",
+        )
+        .into());
     }
 
     // the additional byte is for the RPC code
@@ -158,7 +166,11 @@ impl<'a> RpcMessage<'a> {
         let v = de::from_slice(payload)?;
         if v.1 != payload.len() {
             let bytes_remaining = crate::make_pretty_hex(&payload[v.1..]);
-            trace!("{} remaining bytes after deserializing {}\n{bytes_remaining}", payload.len() - v.1, std::any::type_name::<T>());
+            trace!(
+                "{} remaining bytes after deserializing {}\n{bytes_remaining}",
+                payload.len() - v.1,
+                std::any::type_name::<T>()
+            );
         }
         Ok(v.0)
     }
@@ -170,7 +182,10 @@ impl<'a> RpcMessage<'a> {
         let res = match msg_type {
             0x0a => {
                 if !payload.is_empty() {
-                    trace!("Ok message with additional data: {} bytes: {payload:02x?}", payload.len());
+                    trace!(
+                        "Ok message with additional data: {} bytes: {payload:02x?}",
+                        payload.len()
+                    );
                 }
                 RpcMessage::Ok(())
             },

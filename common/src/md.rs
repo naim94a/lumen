@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use serde::{Serialize, Deserialize};
 use crate::rpc::de::from_slice;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct MetadataChunk<'a> {
@@ -41,7 +41,8 @@ impl<'a> FunctionMetadata<'a> {
         // TODO: rewrite using regex with configurable library names
         match self {
             FunctionMetadata::ExtraComment(cmt) => {
-                if cmt.anterior.starts_with("; Exported entry ") // offset=0
+                if cmt.anterior.starts_with("; Exported entry ")
+                // offset=0
                 {
                     return false;
                 }
@@ -80,7 +81,9 @@ impl<'a> FunctionMetadata<'a> {
     }
 }
 
-fn deserialize_seq<'de, T: Deserialize<'de>>(mut data: &'de [u8]) -> Result<Vec<(u32, T)>, crate::rpc::Error> {
+fn deserialize_seq<'de, T: Deserialize<'de>>(
+    mut data: &'de [u8],
+) -> Result<Vec<(u32, T)>, crate::rpc::Error> {
     let mut res = vec![];
     let mut reset = true;
     let (mut offset, used): (u32, usize) = from_slice(data)?;
@@ -95,7 +98,7 @@ fn deserialize_seq<'de, T: Deserialize<'de>>(mut data: &'de [u8]) -> Result<Vec<
         if data.is_empty() {
             return Err(crate::rpc::Error::UnexpectedEof);
         }
-        
+
         if (offset_diff > 0) || reset {
             offset += offset_diff;
             let (e, used): (T, usize) = from_slice(data)?;
@@ -125,7 +128,7 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
     let mut bad_codes = HashSet::new();
 
     while !data.is_empty() {
-        let (chunk, used) :(MetadataChunk, _) = from_slice(data)?;
+        let (chunk, used): (MetadataChunk, _) = from_slice(data)?;
         data = &data[used..];
 
         let data = chunk.data;
@@ -137,15 +140,17 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
         match chunk.code {
             1 => {}, // TODO: parse typeinfo
             2 => {}, // nop
-            3 | 4 => { // function comments
+            3 | 4 => {
+                // function comments
                 let is_repeatable = chunk.code == 4;
                 let cmt = std::str::from_utf8(data)?;
-                res.push(FunctionMetadata::FunctionComment(FunctionComment{
+                res.push(FunctionMetadata::FunctionComment(FunctionComment {
                     is_repeatable,
                     comment: cmt,
                 }));
             },
-            5 | 6 => { // comments
+            5 | 6 => {
+                // comments
                 let is_repeatable = chunk.code == 6;
                 let byte_comments: Vec<(_, &[u8])> = match deserialize_seq(data) {
                     Ok(v) => v,
@@ -154,19 +159,18 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
                         return Err(err);
                     },
                 };
-                
+
                 for comment in byte_comments {
                     let cmt = std::str::from_utf8(comment.1)?;
-                    res.push(FunctionMetadata::ByteComment(
-                        ByteComment{
-                            is_repeatable,
-                            offset: comment.0,
-                            comment: cmt,
-                        }
-                    ));
+                    res.push(FunctionMetadata::ByteComment(ByteComment {
+                        is_repeatable,
+                        offset: comment.0,
+                        comment: cmt,
+                    }));
                 }
             },
-            7 => { // extra comments
+            7 => {
+                // extra comments
                 let byte_comments: Vec<(_, (&[u8], &[u8]))> = match deserialize_seq(data) {
                     Ok(v) => v,
                     Err(err) => {
@@ -174,12 +178,12 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
                         return Err(err);
                     },
                 };
-                
+
                 for comment in byte_comments {
-                    res.push(FunctionMetadata::ExtraComment(ExtraComment{
+                    res.push(FunctionMetadata::ExtraComment(ExtraComment {
                         offset: comment.0,
-                        anterior: std::str::from_utf8(comment.1.0)?,
-                        posterior: std::str::from_utf8(comment.1.1)?,
+                        anterior: std::str::from_utf8(comment.1 .0)?,
+                        posterior: std::str::from_utf8(comment.1 .1)?,
                     }));
                 }
             },
@@ -201,7 +205,7 @@ pub fn get_score(md: &crate::rpc::PushMetadataFunc) -> u32 {
         Err(e) => {
             log::warn!("failed to parse metadata: {}", e);
             return 0;
-        }
+        },
     };
 
     for md in md {

@@ -1,7 +1,7 @@
-use std::borrow::Cow;
 use log::*;
-use warp::{Filter, Reply, Rejection};
 use serde::Serialize;
+use std::borrow::Cow;
+use warp::{Filter, Rejection, Reply};
 
 use super::SharedState;
 
@@ -14,8 +14,7 @@ impl std::str::FromStr for Md5 {
         if s.len() != 32 {
             return Err("bad md5 length");
         }
-        binascii::hex2bin(s.as_bytes(), &mut res)
-            .map_err(|_| "bad md5")?;
+        binascii::hex2bin(s.as_bytes(), &mut res).map_err(|_| "bad md5")?;
         Ok(Md5(res))
     }
 }
@@ -40,7 +39,9 @@ impl Serialize for Md5 {
     }
 }
 
-pub fn api_root(state: SharedState) -> impl Filter<Extract = (impl Reply + 'static, ), Error=Rejection> + Clone {
+pub fn api_root(
+    state: SharedState,
+) -> impl Filter<Extract = (impl Reply + 'static,), Error = Rejection> + Clone {
     let view_file = warp::get()
         .and(warp::path("files"))
         .and(super::with_state(state.clone()))
@@ -52,8 +53,7 @@ pub fn api_root(state: SharedState) -> impl Filter<Extract = (impl Reply + 'stat
         .and(warp::filters::path::param::<Md5>())
         .and_then(view_func_by_hash);
 
-    view_file
-        .or(view_func)
+    view_file.or(view_func)
 }
 
 // GET server/api/files/:md5
@@ -69,18 +69,15 @@ async fn view_file_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
         Ok(v) => v,
         Err(err) => {
             error!("failed to get file's funcs {}: {}", &md5, err);
-            return Ok(warp::reply::json(&Error{error: "internal server error"}));
+            return Ok(warp::reply::json(&Error { error: "internal server error" }));
         },
     };
-    let v: Vec<_> = v.into_iter()
+    let v: Vec<_> = v
+        .into_iter()
         .map(|v| {
             let mut hash = [0u8; 16];
             hash.copy_from_slice(&v.2);
-            FileFunc {
-                name: v.0,
-                len: v.1 as u32,
-                hash: Md5(hash),
-            }
+            FileFunc { name: v.0, len: v.1 as u32, hash: Md5(hash) }
         })
         .collect();
 
@@ -93,7 +90,7 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
     enum CommentType {
         Posterior,
         Anterior,
-        Function{ repeatable: bool },
+        Function { repeatable: bool },
         Byte { repeatable: bool },
     }
 
@@ -114,27 +111,27 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
         in_files: &'a [Md5],
     }
 
-    let funcs = [crate::rpc::PullMetadataFunc {
-        unk0: 1,
-        mb_hash: &md5.0
-    }];
+    let funcs = [crate::rpc::PullMetadataFunc { unk0: 1, mb_hash: &md5.0 }];
 
     let files_with = state.db.get_files_with_func(&md5.0[..]);
-    let files_info =  state.db.get_funcs(&funcs);
+    let files_info = state.db.get_funcs(&funcs);
 
     let (files_with, files_info) = match futures_util::try_join!(files_with, files_info) {
         Ok(v) => v,
         Err(err) => {
             error!("failed to execute db queries: {}", err);
-            return Ok(warp::reply::json(&Error {error: "internal server error"}));
-        }
+            return Ok(warp::reply::json(&Error { error: "internal server error" }));
+        },
     };
 
-    let files_with: Vec<Md5> = files_with.into_iter().map(|v| {
-        let mut md5 = [0u8; 16];
-        md5.copy_from_slice(&v);
-        Md5(md5)
-    }).collect();
+    let files_with: Vec<Md5> = files_with
+        .into_iter()
+        .map(|v| {
+            let mut md5 = [0u8; 16];
+            md5.copy_from_slice(&v);
+            Md5(md5)
+        })
+        .collect();
 
     let v = files_info;
     let v: Vec<FuncInfo> = v
@@ -147,58 +144,49 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
                 Err(e) => {
                     error!("error parsing metadata for {}: {}", &md5, e);
                     return None;
-                }
+                },
             };
-            let comments: Vec<Comment> = md.into_iter()
-                .filter_map(|md| {
-                    match md {
-                        crate::md::FunctionMetadata::ByteComment(c) => {
-                            Some(vec![Comment {
+            let comments: Vec<Comment> = md
+                .into_iter()
+                .filter_map(|md| match md {
+                    crate::md::FunctionMetadata::ByteComment(c) => Some(vec![Comment {
+                        offset: Some(c.offset),
+                        type_: CommentType::Byte { repeatable: c.is_repeatable },
+                        comment: c.comment.into(),
+                    }]),
+                    crate::md::FunctionMetadata::FunctionComment(c) => Some(vec![Comment {
+                        offset: None,
+                        type_: CommentType::Function { repeatable: c.is_repeatable },
+                        comment: c.comment.into(),
+                    }]),
+                    crate::md::FunctionMetadata::ExtraComment(c) => {
+                        let mut res = vec![];
+                        if !c.anterior.is_empty() {
+                            res.push(Comment {
                                 offset: Some(c.offset),
-                                type_: CommentType::Byte{ repeatable: c.is_repeatable },
-                                comment: c.comment.into(),
-                            }])
-                        },
-                        crate::md::FunctionMetadata::FunctionComment(c) => {
-                            Some(vec![Comment {
-                                offset: None,
-                                type_: CommentType::Function{ repeatable: c.is_repeatable },
-                                comment: c.comment.into(),
-                            }])
-                        },
-                        crate::md::FunctionMetadata::ExtraComment(c) => {
-                            let mut res = vec![];
-                            if !c.anterior.is_empty() {
-                                res.push(Comment {
-                                    offset: Some(c.offset),
-                                    type_: CommentType::Anterior,
-                                    comment: c.anterior.into(),
-                                });
-                            }
-                            if !c.posterior.is_empty() {
-                                res.push(Comment {
-                                    offset: Some(c.offset),
-                                    type_: CommentType::Posterior,
-                                    comment: c.posterior.into(),
-                                });
-                            }
-                            if !res.is_empty() {
-                                Some(res)
-                            } else {
-                                None
-                            }
-                        },
-                    }
+                                type_: CommentType::Anterior,
+                                comment: c.anterior.into(),
+                            });
+                        }
+                        if !c.posterior.is_empty() {
+                            res.push(Comment {
+                                offset: Some(c.offset),
+                                type_: CommentType::Posterior,
+                                comment: c.posterior.into(),
+                            });
+                        }
+                        if !res.is_empty() {
+                            Some(res)
+                        } else {
+                            None
+                        }
+                    },
                 })
                 .flatten()
                 .collect();
-            Some(FuncInfo {
-                name: &v.name,
-                length: v.len,
-                comments,
-                in_files: &files_with,
-            })
-        }).collect();
+            Some(FuncInfo { name: &v.name, length: v.len, comments, in_files: &files_with })
+        })
+        .collect();
 
     Result::<_, Rejection>::Ok(warp::reply::json(&v))
 }

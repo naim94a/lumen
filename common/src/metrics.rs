@@ -1,6 +1,10 @@
 use std::sync::atomic::AtomicI64;
 
-use prometheus_client::{registry::Registry, metrics::{gauge::Gauge, family::Family, counter::Counter}, encoding::EncodeLabelSet};
+use prometheus_client::{
+    encoding::EncodeLabelSet,
+    metrics::{counter::Counter, family::Family, gauge::Gauge},
+    registry::Registry,
+};
 
 pub struct Metrics {
     pub registry: Registry,
@@ -34,13 +38,25 @@ impl Default for Metrics {
         let mut registry = Registry::default();
 
         let active_connections = Gauge::default();
-        registry.register("lumen_active_connections", "Active Lumina connections", active_connections.clone());
+        registry.register(
+            "lumen_active_connections",
+            "Active Lumina connections",
+            active_connections.clone(),
+        );
 
         let lumina_version = Family::<LuminaVersion, Gauge>::default();
-        registry.register("lumen_protocol_version", "Version of Lumina protocol being used", lumina_version.clone());
+        registry.register(
+            "lumen_protocol_version",
+            "Version of Lumina protocol being used",
+            lumina_version.clone(),
+        );
 
         let new_funcs = Counter::default();
-        registry.register("lumen_new_funcs", "Pushes previously unknown functions", new_funcs.clone());
+        registry.register(
+            "lumen_new_funcs",
+            "Pushes previously unknown functions",
+            new_funcs.clone(),
+        );
 
         let pushes = Counter::default();
         registry.register("lumen_pushes_total", "Total pushes functions", pushes.clone());

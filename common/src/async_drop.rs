@@ -1,6 +1,6 @@
 use futures_util::{future::BoxFuture, Future};
 use log::trace;
-use tokio::{sync::mpsc::{UnboundedSender, unbounded_channel, WeakUnboundedSender}};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender, WeakUnboundedSender};
 
 enum AsyncDropperMsg {
     Future(BoxFuture<'static, ()>),
@@ -29,7 +29,7 @@ impl AsyncDropper {
                     AsyncDropperMsg::Termination => {
                         trace!("term received for '{orig}'...");
                         break;
-                    }
+                    },
                 }
             }
             trace!("dropper '{orig}' exited.");
@@ -41,10 +41,7 @@ impl AsyncDropper {
     /// Defers execution of a future to when the returned `AsyncDropGuard` is dropped
     pub fn defer<F: Future<Output = ()> + Send + 'static>(&self, fut: F) -> AsyncDropGuard {
         let tx = self.tx.downgrade();
-        AsyncDropGuard {
-            tx,
-            run: Some(Box::pin(fut))
-        }
+        AsyncDropGuard { tx, run: Some(Box::pin(fut)) }
     }
 }
 impl Drop for AsyncDropper {
