@@ -13,7 +13,7 @@ use common::{
     db::Database,
     make_pretty_hex, md,
     metrics::LuminaVersion,
-    rpc::{self, Error, HelloResult, RpcFail, RpcHello, RpcMessage},
+    rpc::{self, Creds, Error, HelloResult, RpcFail, RpcHello, RpcMessage},
     SharedState, SharedState_,
 };
 use log::{debug, error, info, trace, warn};
@@ -289,16 +289,39 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
         .get_or_create(&LuminaVersion { protocol_version: hello.protocol_version })
         .inc();
 
-    if let Some(ref creds) = creds {
-        if creds.username != "guest" {
-            // Only allow "guest" to connect for now.
-            rpc::RpcMessage::Fail(rpc::RpcFail {
-                code: 1,
-                message: &format!("{server_name}: invalid username or password. Try logging in with `guest` instead."),
-            }).async_write(&mut stream).await?;
-            return Ok(());
-        }
-    }
+    let creds = creds.unwrap_or(Creds { username: "guest".into(), password: "guest".into() });
+
+    let user = if creds.username != "guest" {
+        let user = match state.db.get_user_by_username(creds.username).await {
+            Ok((user_id, db_creds)) if db_creds.verify_password(creds.password) => {
+                info!("{} logged in successfully.", db_creds.username);
+                (user_id, db_creds)
+            },
+            Ok(_) => {
+                rpc::RpcMessage::Fail(rpc::RpcFail {
+                    code: 1,
+                    message: &format!("{server_name}: invalid username or password."),
+                })
+                .async_write(&mut stream)
+                .await?;
+                return Ok(());
+            },
+            Err(err) => {
+                error!("error while fetching user information: {err}");
+                rpc::RpcMessage::Fail(rpc::RpcFail {
+                    code: 1,
+                    message: &format!("{server_name}: internal error, please try again later."),
+                })
+                .async_write(&mut stream)
+                .await?;
+                return Ok(());
+            },
+        };
+        Some(user)
+    } else {
+        // TODO: check if guest is enabled in config...
+        None
+    };
 
     let resp = match hello.protocol_version {
         0..=4 => rpc::RpcMessage::Ok(()),

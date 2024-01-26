@@ -2,6 +2,10 @@
 
 ## [Unreleased] - _TBD_
 
+### Added
+
+- User management
+
 ## [v0.4.0] - 2024-03-19
 
 ### Added

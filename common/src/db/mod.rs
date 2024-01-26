@@ -6,17 +6,20 @@ use log::*;
 use postgres_native_tls::MakeTlsConnector;
 
 use serde::Serialize;
+use sha2::Sha256;
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use tokio_postgres::{tls::MakeTlsConnect, NoTls, Socket};
 pub mod schema;
 mod schema_auto;
 
+use pbkdf2::{hmac::Hmac, pbkdf2};
+
 use diesel::{
     query_builder::{Query, QueryFragment},
     sql_types::{Array, Binary, Integer, VarChar},
     upsert::excluded,
-    ExpressionMethods, NullableExpressionMethods, QueryDsl,
+    ExpressionMethods, NullableExpressionMethods, QueryDsl, SelectableHelper,
 };
 use diesel_async::{pooled_connection::ManagerConfig, RunQueryDsl};
 
@@ -483,12 +486,18 @@ impl Database {
     pub async fn set_password(&self, username: &str, password: &str) -> Result<(), anyhow::Error> {
         let db = &mut self.diesel.get().await?;
 
-        let salt = vec![0u8; 2];
-        let hash = vec![0u8; 32];
+        let salt: [u8; 12] = rand::random();
+        let mut hash = vec![0u8; 32];
         let iters = 10_000;
+        pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt[..], iters, &mut hash)?;
 
+        let hash = hash;
         let r = diesel::update(creds::table.filter(creds::username.eq(username)))
-            .set(creds::passwd_iters.eq(iters))
+            .set((
+                creds::passwd_hash.eq(hash),
+                creds::passwd_iters.eq(iters as i32),
+                creds::passwd_salt.eq(salt.to_vec()),
+            ))
             .execute(db)
             .await?;
         if r != 1 {
@@ -518,6 +527,18 @@ impl Database {
             .await
             .map_err(|v| v.into())
             .map(|v| v as u32)
+    }
+
+    pub async fn get_user_by_username(
+        &self, username: &str,
+    ) -> Result<(i32, Creds), anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+        let r: (i32, Creds) = creds::table
+            .filter(creds::username.eq(username))
+            .select((creds::id, Creds::as_select()))
+            .get_result(db)
+            .await?;
+        Ok(r)
     }
 }
 
