@@ -305,13 +305,13 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
 
         // starting IDA 8.3
         5.. => rpc::RpcMessage::HelloResult(HelloResult {
-            unk0: "".into(),
-            unk1: "".into(),
-            unk2: "".into(),
-            unk3: "".into(),
-            unk4: 0,
-            unk5: 0,
-            unk6: 0,
+            id: "".into(),
+            username: "".into(),
+            email: "".into(),
+            lic_id: "".into(),
+            karma: 0,
+            last_active: 0,
+            features: 0,
         }),
     };
     resp.async_write(&mut stream).await?;
