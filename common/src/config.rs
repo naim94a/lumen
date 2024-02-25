@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::time::Duration;
 use std::{net::SocketAddr, path::PathBuf};
 use toml::from_str;
 
@@ -34,11 +35,41 @@ pub struct Database {
     pub client_id: Option<PathBuf>,
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(default)]
+pub struct Limits {
+    /// Maximum time to wait on an idle connection between commands.
+    pub command_timeout: Duration,
+
+    /// Maximum time to all `PULL_MD` queries.
+    pub pull_md_timeout: Duration,
+
+    /// Maximum time to wait for `HELO` message.
+    pub hello_timeout: Duration,
+
+    /// Maximum time allowed until TLS handshake completes.
+    pub tls_handshake_timeout: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            command_timeout: Duration::from_secs(3600),
+            pull_md_timeout: Duration::from_secs(4 * 60),
+            hello_timeout: Duration::from_secs(15),
+            tls_handshake_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub lumina: LuminaServer,
     pub api_server: Option<WebServer>,
     pub database: Database,
+
+    #[serde(default)]
+    pub limits: Limits,
 }
 
 pub trait HasConfig {
