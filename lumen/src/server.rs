@@ -9,7 +9,7 @@ use std::{
 
 use common::{
     async_drop::AsyncDropper,
-    config::Config,
+    config::{self, Config},
     db::Database,
     make_pretty_hex, md,
     metrics::LuminaVersion,
@@ -304,15 +304,23 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
         0..=4 => rpc::RpcMessage::Ok(()),
 
         // starting IDA 8.3
-        5.. => rpc::RpcMessage::HelloResult(HelloResult {
-            id: "".into(),
-            username: "".into(),
-            email: "".into(),
-            lic_id: "".into(),
-            karma: 0,
-            last_active: 0,
-            features: 0,
-        }),
+        5.. => {
+            let mut features = 0;
+
+            if state.config.lumina.allow_deletes.unwrap_or(false) {
+                features |= 0x02;
+            }
+
+            rpc::RpcMessage::HelloResult(HelloResult {
+                id: "".into(),
+                username: "".into(),
+                email: "".into(),
+                lic_id: "".into(),
+                karma: 0,
+                last_active: 0,
+                features,
+            })
+        },
     };
     resp.async_write(&mut stream).await?;
 
