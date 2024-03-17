@@ -108,13 +108,13 @@ pub struct DelHistoryResult {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HelloResult<'a> {
-    pub unk0: Cow<'a, str>,
-    pub unk1: Cow<'a, str>,
-    pub unk2: Cow<'a, str>,
-    pub unk3: Cow<'a, str>,
-    pub unk4: u32,
-    pub unk5: u64,
-    pub unk6: u32,
+    pub id: Cow<'a, str>,
+    pub username: Cow<'a, str>,
+    pub email: Cow<'a, str>,
+    pub lic_id: Cow<'a, str>,
+    pub karma: u32,
+    pub last_active: u64,
+    pub features: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
