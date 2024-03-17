@@ -9,7 +9,7 @@ use std::{
 
 use common::{
     async_drop::AsyncDropper,
-    config::{self, Config},
+    config::Config,
     db::Database,
     make_pretty_hex, md,
     metrics::LuminaVersion,
