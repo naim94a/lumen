@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::time::Duration;
 use std::{net::SocketAddr, path::PathBuf};
 use toml::from_str;
