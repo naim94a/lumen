@@ -311,15 +311,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
                 features |= 0x02;
             }
 
-            rpc::RpcMessage::HelloResult(HelloResult {
-                id: "".into(),
-                username: "".into(),
-                email: "".into(),
-                lic_id: "".into(),
-                karma: 0,
-                last_active: 0,
-                features,
-            })
+            rpc::RpcMessage::HelloResult(HelloResult { features, ..Default::default() })
         },
     };
     resp.async_write(&mut stream).await?;

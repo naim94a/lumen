@@ -106,12 +106,17 @@ pub struct DelHistoryResult {
     pub deleted_mds: u32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct HelloResult<'a> {
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct LicenseInfo<'a> {
     pub id: Cow<'a, str>,
-    pub username: Cow<'a, str>,
+    pub name: Cow<'a, str>,
     pub email: Cow<'a, str>,
-    pub lic_id: Cow<'a, str>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct HelloResult<'a> {
+    pub license_info: LicenseInfo<'a>,
+    pub username: Cow<'a, str>,
     pub karma: u32,
     pub last_active: u64,
     pub features: u32,
