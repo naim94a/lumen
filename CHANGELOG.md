@@ -1,11 +1,26 @@
 # Changelog
 
 ## [Unreleased] - _TBD_
+
+## [v0.4.0] - 2024-03-19
+
 ### Added
+
 - Implemented the function histories command.
+- Configurable time limits.
+
+### Fixed
+
+- RPC HelloResult will now report if deletes are enabled.
+
+### Changes
+
+- Applied code formatting using `cargo fmt`
 
 ## [v0.3.0] - 2023-08-22
+
 ### Added
+
 - This changelog.
 - Support for IDA 8.1+ delete command.
 - Pooling for connections to database.
@@ -15,20 +30,26 @@
 - Add Metrics for prometheus.
 
 ### Fixed
+
 - 8K stack size is too small for debug builds.
 
 ## [v0.2.0] - 2022-10-12
+
 ### Added
+
 - Protocol: support for IDA 8.1+ user authentication.
 - Client connection duration limitations.
+
 ### Changed
+
 - Tokio's thread size is reduced from 4M to 8K.
 
-## [v0.1.0]  - 2021-01-21
+## [v0.1.0] - 2021-01-21
+
 This is Lumen's first tagged release. It contains a few fixes and dependency updates since the initial commit (2020-12-17).
 
-
-[Unreleased]: https://github.com/naim94a/lumen/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/naim94a/lumen/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/naim94a/lumen/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/naim94a/lumen/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/naim94a/lumen/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/naim94a/lumen/releases/tag/v0.1.0
