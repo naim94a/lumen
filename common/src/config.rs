@@ -10,16 +10,29 @@ pub struct TlsIdentity {
 }
 
 #[derive(Deserialize)]
+#[serde(default)]
 pub struct LuminaServer {
     pub bind_addr: SocketAddr,
-    pub use_tls: Option<bool>,
+    pub use_tls: bool,
     pub tls: Option<TlsIdentity>,
     pub server_name: Option<String>,
-    pub allow_deletes: Option<bool>,
+    pub allow_deletes: bool,
 
     /// limit of function histories to return per function.
     /// `None`, or `Some(0)` will disable the feature on the server.
-    pub get_history_limit: Option<u32>,
+    pub get_history_limit: NonZeroU32,
+}
+impl Default for LuminaServer {
+    fn default() -> Self {
+        Self {
+            bind_addr: "0.0.0.0:1234".parse().unwrap(),
+            use_tls: false,
+            tls: None,
+            server_name: None,
+            allow_deletes: false,
+            get_history_limit: NonZeroU32::new(50).unwrap(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
