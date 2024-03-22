@@ -3,14 +3,14 @@ use std::borrow::Cow;
 
 #[derive(Deserialize, Serialize)]
 pub struct RpcFail<'a> {
-    pub code: u32,
-    pub message: &'a str,
+    pub result: u32,
+    pub error: &'a str,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct RpcNotify<'a> {
-    pub code: u32,
-    pub msg: &'a str,
+    pub ty: u32,
+    pub text: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -21,25 +21,25 @@ pub struct Creds<'a> {
 
 #[derive(Serialize, Deserialize)]
 pub struct RpcHello<'a> {
-    pub protocol_version: u32,
+    pub client_version: u32,
     pub license_data: &'a [u8],
     pub lic_number: [u8; 6],
-    pub unk2: u32,
+    pub record_conv: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct PullMetadataFunc<'a> {
-    pub unk0: u32,
-    pub mb_hash: &'a [u8],
+pub struct PatternId<'a> {
+    pub ty: u32,
+    pub data: &'a [u8],
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct PullMetadata<'a> {
-    pub unk0: u32,
-    pub unk1: Cow<'a, [u32]>,
+    pub flags: u32,
+    pub keys: Cow<'a, [u32]>,
 
     #[serde(borrow)]
-    pub funcs: Cow<'a, [PullMetadataFunc<'a>]>,
+    pub pattern_ids: Cow<'a, [PatternId<'a>]>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -52,7 +52,7 @@ pub struct PullMetadataResultFunc<'a> {
 
 #[derive(Deserialize, Serialize)]
 pub struct PullMetadataResult<'a> {
-    pub unk0: Cow<'a, [u32]>,
+    pub codes: Cow<'a, [u32]>,
     #[serde(borrow)]
     pub funcs: Cow<'a, [PullMetadataResultFunc<'a>]>,
 }
@@ -62,21 +62,18 @@ pub struct PushMetadataFunc<'a> {
     pub name: &'a str,
     pub func_len: u32,
     pub func_data: &'a [u8],
-
-    // PullMetadata's fields (tuple 'unk2') are similar to these two
-    pub unk2: u32,
-    pub hash: &'a [u8],
+    pub pattern_id: PatternId<'a>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct PushMetadata<'a> {
-    pub unk0: u32,
+    pub flags: u32,
     pub idb_path: &'a str,
-    pub file_path: &'a str,
-    pub md5: [u8; 16],
+    pub input_path: &'a str,
+    pub input_md5: [u8; 16],
     pub hostname: &'a str,
     pub funcs: Cow<'a, [PushMetadataFunc<'a>]>,
-    pub unk1: Cow<'a, [u64]>,
+    pub ea64s: Cow<'a, [u64]>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -87,23 +84,23 @@ pub struct PushMetadataResult<'a> {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DelHistory<'a> {
-    pub unk0: u32, // =0x08
-    pub unk1: Cow<'a, [Cow<'a, str>]>,
-    pub unk2: Cow<'a, [[u64; 2]]>,
-    pub unk3: Cow<'a, [[u64; 2]]>,
-    pub unk4: Cow<'a, [Cow<'a, str>]>,
-    pub unk5: Cow<'a, [Cow<'a, str>]>,
-    pub unk6: Cow<'a, [Cow<'a, str>]>,
-    pub unk7: Cow<'a, [Cow<'a, str>]>,
-    pub unk8: Cow<'a, [Cow<'a, [u8; 16]>]>,
-    pub funcs: Cow<'a, [Cow<'a, [u8; 16]>]>,
-    pub unk10: Cow<'a, [[u64; 2]]>,
-    pub unk11: u64,
+    pub flags: u32, // =0x08
+    pub license_ids: Cow<'a, [Cow<'a, str>]>,
+    pub time_ranges: Cow<'a, [[u64; 2]]>,
+    pub history_id_ranges: Cow<'a, [[u64; 2]]>,
+    pub idbs: Cow<'a, [Cow<'a, str>]>,
+    pub inputs: Cow<'a, [Cow<'a, str>]>,
+    pub funcs: Cow<'a, [Cow<'a, str>]>, // funcs
+    pub usernames: Cow<'a, [Cow<'a, str>]>,
+    pub input_hashes: Cow<'a, [Cow<'a, [u8; 16]>]>,
+    pub calcrel_hashes: Cow<'a, [Cow<'a, [u8; 16]>]>,
+    pub push_id_ranges: Cow<'a, [[u64; 2]]>,
+    pub max_entries: u64,
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct DelHistoryResult {
-    pub deleted_mds: u32,
+    pub ndeleted: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -125,8 +122,8 @@ pub struct HelloResult<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GetFuncHistories<'a> {
     #[serde(borrow)]
-    pub funcs: Cow<'a, [PullMetadataFunc<'a>]>,
-    pub unk0: u32,
+    pub funcs: Cow<'a, [PatternId<'a>]>,
+    pub flags: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -151,6 +148,6 @@ pub struct GetFuncHistoriesResult<'a> {
     pub status: Cow<'a, [u32]>,
     #[serde(borrow)]
     pub funcs: Cow<'a, [FunctionHistories<'a>]>,
-    pub users: Cow<'a, [Cow<'a, str>]>,
-    pub dbs: Cow<'a, [Cow<'a, str>]>,
+    pub authors: Cow<'a, [Cow<'a, str>]>,
+    pub idb_paths: Cow<'a, [Cow<'a, str>]>,
 }

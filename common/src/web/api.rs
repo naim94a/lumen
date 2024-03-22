@@ -111,7 +111,7 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
         in_files: &'a [Md5],
     }
 
-    let funcs = [crate::rpc::PullMetadataFunc { unk0: 1, mb_hash: &md5.0 }];
+    let funcs = [crate::rpc::PatternId { ty: 1, data: &md5.0 }];
 
     let files_with = state.db.get_files_with_func(&md5.0[..]);
     let files_info = state.db.get_funcs(&funcs);

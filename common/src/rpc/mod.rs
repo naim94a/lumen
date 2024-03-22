@@ -193,7 +193,7 @@ impl<'a> RpcMessage<'a> {
             0x0c => RpcMessage::Notify(Self::deserialize_check(payload)?),
             0x0d => {
                 let (hello, consumed) = de::from_slice::<messages::RpcHello>(payload)?;
-                let creds = if payload.len() > consumed && hello.protocol_version > 2 {
+                let creds = if payload.len() > consumed && hello.client_version > 2 {
                     let payload = &payload[consumed..];
                     let (creds, consumed) = de::from_slice::<Creds>(payload)?;
                     if payload.len() != consumed {
@@ -201,7 +201,7 @@ impl<'a> RpcMessage<'a> {
                     }
                     Some(creds)
                 } else {
-                    if hello.protocol_version > 2 || payload.len() != consumed {
+                    if hello.client_version > 2 || payload.len() != consumed {
                         trace!("Unexpected Hello msg: {payload:02x?}");
                     }
                     None

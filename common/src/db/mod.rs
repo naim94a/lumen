@@ -140,9 +140,9 @@ impl Database {
     }
 
     pub async fn get_funcs(
-        &self, funcs: &[crate::rpc::PullMetadataFunc<'_>],
+        &self, funcs: &[crate::rpc::PatternId<'_>],
     ) -> Result<Vec<Option<FunctionInfo>>, anyhow::Error> {
-        let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.mb_hash).collect();
+        let chksums: Vec<&[u8]> = funcs.iter().map(|v| v.data).collect();
 
         let rows: Vec<(String, i32, Vec<u8>, Vec<u8>)> = {
             let conn = &mut self.diesel.get().await?;
@@ -231,7 +231,7 @@ impl Database {
     ) -> Result<i32, anyhow::Error> {
         use schema::files::{chksum, id, table as files};
 
-        let hash = &funcs.md5[..];
+        let hash = &funcs.input_md5[..];
 
         let conn = &mut self.diesel.get().await?;
 
@@ -279,7 +279,7 @@ impl Database {
             dbs.select(db_id)
                 .filter(db_user.eq(user_id))
                 .filter(db_file_id.eq(file_id))
-                .filter(file_path.eq(funcs.file_path))
+                .filter(file_path.eq(funcs.input_path))
                 .filter(idb_path.eq(funcs.idb_path))
         };
 
@@ -293,7 +293,7 @@ impl Database {
             .values(vec![(
                 db_user.eq(user_id),
                 db_file_id.eq(file_id),
-                file_path.eq(funcs.file_path),
+                file_path.eq(funcs.input_path),
                 idb_path.eq(funcs.idb_path),
             )])
             .returning(db_id)
@@ -329,7 +329,7 @@ impl Database {
         for (idx, (func, &score)) in funcs.funcs.iter().zip(scores.iter()).enumerate() {
             let name = func.name;
             let len = func.func_len as i32;
-            let chksum = func.hash;
+            let chksum = func.pattern_id.data;
             let md = func.func_data;
             let score = score as i32;
 
@@ -432,7 +432,7 @@ impl Database {
     ) -> Result<(), anyhow::Error> {
         use schema::funcs::{chksum, table as funcs};
 
-        let chksums = req.funcs.iter().map(|v| v.as_slice()).collect::<Vec<_>>();
+        let chksums = req.calcrel_hashes.iter().map(|v| v.as_slice()).collect::<Vec<_>>();
 
         let conn = &mut self.diesel.get().await?;
         let rows_modified =

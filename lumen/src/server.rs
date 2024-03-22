@@ -77,8 +77,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
         },
         Err(_) => {
             _ = RpcMessage::Fail(RpcFail {
-                code: 0,
-                message: &format!("{server_name} client idle for too long.\n"),
+                result: 0,
+                error: &format!("{server_name} client idle for too long.\n"),
             })
             .async_write(&mut stream)
             .await;
@@ -97,8 +97,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             warn!("bad message: \n{}\n", make_pretty_hex(&req));
             error!("failed to process rpc message: {}", err);
             let resp = rpc::RpcFail {
-                code: 0,
-                message: &format!("{server_name}: error: invalid data.\n"),
+                result: 0,
+                error: &format!("{server_name}: error: invalid data.\n"),
             };
             let resp = RpcMessage::Fail(resp);
             resp.async_write(&mut stream).await?;
@@ -109,16 +109,16 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
     match req {
         RpcMessage::PullMetadata(md) => {
             let start = Instant::now();
-            let funcs = match timeout(Duration::from_secs(4 * 60), db.get_funcs(&md.funcs)).await {
+            let funcs = match timeout(Duration::from_secs(4 * 60), db.get_funcs(&md.pattern_ids))
+                .await
+            {
                 Ok(r) => match r {
                     Ok(v) => v,
                     Err(e) => {
                         error!("pull failed, db: {}", e);
                         rpc::RpcMessage::Fail(rpc::RpcFail {
-                            code: 0,
-                            message: &format!(
-                                "{server_name}:  db error; please try again later..\n"
-                            ),
+                            result: 0,
+                            error: &format!("{server_name}:  db error; please try again later..\n"),
                         })
                         .async_write(&mut stream)
                         .await?;
@@ -127,8 +127,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 },
                 Err(_) => {
                     RpcMessage::Fail(RpcFail {
-                        code: 0,
-                        message: &format!("{server_name}: query took too long to execute.\n"),
+                        result: 0,
+                        error: &format!("{server_name}: query took too long to execute.\n"),
                     })
                     .async_write(&mut stream)
                     .await?;
@@ -138,10 +138,10 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             };
             let pulled_funcs = funcs.iter().filter(|v| v.is_some()).count();
             state.metrics.pulls.inc_by(pulled_funcs as _);
-            state.metrics.queried_funcs.inc_by(md.funcs.len() as _);
+            state.metrics.queried_funcs.inc_by(md.pattern_ids.len() as _);
             debug!(
                 "pull {pulled_funcs}/{} funcs ended after {:?}",
-                md.funcs.len(),
+                md.pattern_ids.len(),
                 start.elapsed()
             );
 
@@ -158,7 +158,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 .collect();
 
             RpcMessage::PullMetadataResult(rpc::PullMetadataResult {
-                unk0: Cow::Owned(statuses),
+                codes: Cow::Owned(statuses),
                 funcs: Cow::Owned(found),
             })
             .async_write(&mut stream)
@@ -175,8 +175,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                     Err(err) => {
                         log::error!("push failed, db: {}", err);
                         rpc::RpcMessage::Fail(rpc::RpcFail {
-                            code: 0,
-                            message: &format!("{server_name}: db error; please try again later.\n"),
+                            result: 0,
+                            error: &format!("{server_name}: db error; please try again later.\n"),
                         })
                         .async_write(&mut stream)
                         .await?;
@@ -201,8 +201,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             let is_delete_allowed = state.config.lumina.allow_deletes.unwrap_or(false);
             if !is_delete_allowed {
                 RpcMessage::Fail(rpc::RpcFail {
-                    code: 2,
-                    message: &format!("{server_name}: Delete command is disabled on this server."),
+                    result: 2,
+                    error: &format!("{server_name}: Delete command is disabled on this server."),
                 })
                 .async_write(&mut stream)
                 .await?;
@@ -210,15 +210,15 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 if let Err(err) = db.delete_metadata(&req).await {
                     error!("delete failed. db: {err}");
                     RpcMessage::Fail(rpc::RpcFail {
-                        code: 3,
-                        message: &format!("{server_name}: db error, please try again later."),
+                        result: 3,
+                        error: &format!("{server_name}: db error, please try again later."),
                     })
                     .async_write(&mut stream)
                     .await?;
                     return Ok(());
                 }
                 RpcMessage::DelHistoryResult(rpc::DelHistoryResult {
-                    deleted_mds: req.funcs.len() as u32,
+                    ndeleted: req.calcrel_hashes.len() as u32,
                 })
                 .async_write(&mut stream)
                 .await?;
@@ -229,8 +229,8 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
 
             if limit == 0 {
                 RpcMessage::Fail(rpc::RpcFail {
-                    code: 4,
-                    message: &format!(
+                    result: 4,
+                    error: &format!(
                         "{server_name}: function histories are disabled on this server."
                     ),
                 })
@@ -241,14 +241,14 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
 
             let mut statuses = vec![];
             let mut res = vec![];
-            for chksum in req.funcs.iter().map(|v| v.mb_hash) {
+            for chksum in req.funcs.iter().map(|v| v.data) {
                 let history = match db.get_func_histories(chksum, limit).await {
                     Ok(v) => v,
                     Err(err) => {
                         error!("failed to get function histories: {err:?}");
                         RpcMessage::Fail(rpc::RpcFail {
-                            code: 3,
-                            message: &format!("{server_name}: db error, please try again later."),
+                            result: 3,
+                            error: &format!("{server_name}: db error, please try again later."),
                         })
                         .async_write(&mut stream)
                         .await?;
@@ -280,16 +280,16 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             RpcMessage::GetFuncHistoriesResult(rpc::GetFuncHistoriesResult {
                 status: statuses.into(),
                 funcs: Cow::Owned(res),
-                users: vec![].into(),
-                dbs: vec![].into(),
+                authors: vec![].into(),
+                idb_paths: vec![].into(),
             })
             .async_write(&mut stream)
             .await?;
         },
         _ => {
             RpcMessage::Fail(rpc::RpcFail {
-                code: 0,
-                message: &format!("{server_name}: invalid data.\n"),
+                result: 0,
+                error: &format!("{server_name}: invalid data.\n"),
             })
             .async_write(&mut stream)
             .await?;
@@ -312,14 +312,14 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
 
     let (hello, creds) = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v, creds)) => {
-            debug!("hello protocol={}, login creds: {creds:?}", v.protocol_version);
+            debug!("hello protocol={}, login creds: {creds:?}", v.client_version);
             (v, creds)
         },
         _ => {
             // send error
             error!("got bad hello message");
 
-            let resp = rpc::RpcFail { code: 0, message: &format!("{server_name}: bad sequence.") };
+            let resp = rpc::RpcFail { result: 0, error: &format!("{server_name}: bad sequence.") };
             let resp = rpc::RpcMessage::Fail(resp);
             resp.async_write(&mut stream).await?;
 
@@ -329,7 +329,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     state
         .metrics
         .lumina_version
-        .get_or_create(&LuminaVersion { protocol_version: hello.protocol_version })
+        .get_or_create(&LuminaVersion { protocol_version: hello.client_version })
         .inc();
 
     let creds = creds.unwrap_or(Creds { username: "guest", password: "guest" });
@@ -343,8 +343,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
             },
             Ok(_) => {
                 rpc::RpcMessage::Fail(rpc::RpcFail {
-                    code: 1,
-                    message: &format!("{server_name}: invalid username or password."),
+                    result: 1,
+                    error: &format!("{server_name}: invalid username or password."),
                 })
                 .async_write(&mut stream)
                 .await?;
@@ -353,8 +353,8 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
             Err(err) => {
                 error!("error while fetching user information: {err}");
                 rpc::RpcMessage::Fail(rpc::RpcFail {
-                    code: 1,
-                    message: &format!("{server_name}: internal error, please try again later."),
+                    result: 1,
+                    error: &format!("{server_name}: internal error, please try again later."),
                 })
                 .async_write(&mut stream)
                 .await?;
@@ -375,15 +375,15 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     if !user.1.is_enabled {
         info!("attempt to login to disabled account [{}].", user.1.username);
         rpc::RpcMessage::Fail(rpc::RpcFail {
-            code: 1,
-            message: &format!("{server_name}: account disabled."),
+            result: 1,
+            error: &format!("{server_name}: account disabled."),
         })
         .async_write(&mut stream)
         .await?;
         return Ok(());
     }
 
-    let resp = match hello.protocol_version {
+    let resp = match hello.client_version {
         0..=4 => rpc::RpcMessage::Ok(()),
 
         // starting IDA 8.3
