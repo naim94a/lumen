@@ -70,7 +70,15 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
     let server_name = state.server_name.as_str();
 
     trace!("waiting for command..");
-    let req = match timeout(Duration::from_secs(3600), rpc::read_packet(&mut stream)).await {
+    let rpkt = async {
+        let hdr = rpc::read_packet_header(&mut stream).await?;
+        // we don't want to read a whole request just to find out the user was revoked...
+        if !session.is_valid().await {
+            return Err(Error::Timeout);
+        }
+        hdr.read(&mut stream).await
+    };
+    let req = match timeout(Duration::from_secs(3600), rpkt).await {
         Ok(res) => match res {
             Ok(v) => v,
             Err(e) => return Err(e),
@@ -298,11 +306,38 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
     Ok(())
 }
 
+async fn http_reply<W: AsyncRead + AsyncWrite + Unpin>(mut stream: W) {
+    use tokio::io::AsyncWriteExt;
+
+    const HTTP_REPLY: &str = concat!(
+        "HTTP/1.1 400 bad request\r\n",
+        "Refresh: 2; URL=https://github.com/naim94a/lumen\r\n",
+        "Server: lumen\r\n",
+        "Connection: close\r\n",
+        "Content-Type: text/html\r\n",
+        "",
+        "\r\n",
+        "<pre>This is not an HTTP server. <br />Redirecting to <a href=\"https://github.com/naim94a/lumen\">lumen</a> ...</pre>\n",
+    );
+
+    let _ = stream.write_all(HTTP_REPLY.as_bytes()).await;
+}
+
 async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     state: &SharedState, mut stream: S,
 ) -> Result<(), rpc::Error> {
     let server_name = &state.server_name;
-    let hello = match timeout(Duration::from_secs(15), rpc::read_packet(&mut stream)).await {
+    let rpkt = async {
+        let hdr = rpc::read_packet_header(&mut stream).await?;
+        if hdr.is_http() {
+            // looks like someone is using a browser instead of IDA, what a fool.
+            debug!("ignoring http request...");
+            http_reply(&mut stream).await;
+            return Err(Error::Eof);
+        }
+        hdr.read(&mut stream).await
+    };
+    let hello = match timeout(Duration::from_secs(15), rpkt).await {
         Ok(v) => v?,
         Err(_) => {
             debug!("didn't get hello in time.");

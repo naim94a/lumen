@@ -63,7 +63,14 @@ fn get_code_maxlen(code: u8) -> usize {
     }
 }
 
-pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>, Error> {
+pub struct PacketHeader {
+    code: u8,
+    size: usize,
+}
+
+pub async fn read_packet_header<R: AsyncRead + Unpin>(
+    mut reader: R,
+) -> Result<PacketHeader, Error> {
     let mut head = [0u8; 5];
     match reader.read_exact(&mut head).await {
         Ok(_) => {},
@@ -83,28 +90,45 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
         .into());
     }
 
-    let max_len = get_code_maxlen(code);
+    Ok(PacketHeader { code, size: buf_len })
+}
 
-    if buf_len > max_len {
-        info!("maxium size exceeded: code={}: max={}; req={}", code, max_len, buf_len);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "request length exceeded maximum limit",
-        )
-        .into());
+impl PacketHeader {
+    pub async fn read<R: AsyncRead + Unpin>(self, mut reader: R) -> Result<Vec<u8>, Error> {
+        trace!("expecting {} bytes...", self.size);
+        let buf_len = self.size + 1;
+
+        let max_len = get_code_maxlen(self.code);
+        if self.size > max_len {
+            info!("maxium size exceeded: code={}: max={}; req={}", self.code, max_len, self.size);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "request length exceeded maximum limit",
+            )
+            .into());
+        }
+
+        let mut data = Vec::new();
+        data.try_reserve_exact(buf_len)?;
+        data.resize(buf_len, 0);
+        data[0] = self.code;
+        reader.read_exact(&mut data[1..]).await?;
+
+        Ok(data)
     }
 
-    // the additional byte is for the RPC code
-    trace!("expecting {} bytes...", buf_len);
-    let buf_len = buf_len + 1;
+    // returns true if this could be an http request.
+    pub fn is_http(&self) -> bool {
+        let mut sz = (self.size as u32).to_be_bytes();
+        sz.make_ascii_uppercase();
+        let sz = &sz[..];
 
-    let mut data = Vec::new();
-    data.try_reserve_exact(buf_len)?;
-    data.resize(buf_len, 0);
-    data[0] = code;
-    reader.read_exact(&mut data[1..]).await?;
-
-    Ok(data)
+        match sz {
+            b"GET " | b"PUT " if self.code == b'/' => true,
+            b"POST" | b"HEAD" if self.code == b' ' => true,
+            _ => false,
+        }
+    }
 }
 
 async fn write_packet<W: AsyncWrite + Unpin>(mut w: W, data: &[u8]) -> Result<(), std::io::Error> {
