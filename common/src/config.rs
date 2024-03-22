@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::num::NonZeroU32;
 use std::time::Duration;
 use std::{net::SocketAddr, path::PathBuf};
 use toml::from_str;
@@ -63,6 +64,22 @@ impl Default for Limits {
 }
 
 #[derive(Deserialize)]
+#[serde(default)]
+pub struct Users {
+    /// Sets if guests are allowed to login. required for IDA<8.1
+    pub allow_guests: bool,
+
+    /// PBKDF2 iterations for newly set passwords.
+    pub pbkdf2_iterations: NonZeroU32,
+}
+
+impl Default for Users {
+    fn default() -> Self {
+        Self { allow_guests: true, pbkdf2_iterations: NonZeroU32::new(120_000).unwrap() }
+    }
+}
+
+#[derive(Deserialize)]
 pub struct Config {
     pub lumina: LuminaServer,
     pub api_server: Option<WebServer>,
@@ -70,6 +87,9 @@ pub struct Config {
 
     #[serde(default)]
     pub limits: Limits,
+
+    #[serde(default)]
+    pub users: Users,
 }
 
 pub trait HasConfig {

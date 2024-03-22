@@ -23,7 +23,7 @@ diesel::table! {
 
 diesel::joinable!(func_ranks -> dbs (id));
 
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Insertable, Queryable, Selectable, Default)]
 #[diesel(table_name = creds)]
 pub struct Creds<'a> {
     pub username: Cow<'a, str>,
@@ -33,7 +33,10 @@ pub struct Creds<'a> {
     pub passwd_iters: i32,
     pub passwd_hash: Option<Cow<'a, [u8]>>,
 
+    pub last_active: Option<time::OffsetDateTime>,
+
     pub is_admin: bool,
+    pub is_enabled: bool,
 }
 
 impl<'a> Creds<'a> {
@@ -48,7 +51,7 @@ impl<'a> Creds<'a> {
         } else {
             return false;
         };
-        if self.passwd_iters == 0 {
+        if self.passwd_iters <= 0 {
             return false;
         }
 
@@ -61,5 +64,32 @@ impl<'a> Creds<'a> {
         }
 
         hash == current_hash.as_ref()
+    }
+
+    pub(crate) fn generate_creds(password: &str, iters: u32) -> ([u8; 4], [u8; 32]) {
+        let salt: [u8; 4] = rand::random();
+        let mut res = [0u8; 32];
+        pbkdf2::pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt, iters, &mut res)
+            .expect("failed to perform pbkdf2_hmac_sha256");
+        (salt, res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_and_verify_password() {
+        let password = "MyPassword1$";
+        let iters = 10_000;
+        let (salt, hash) = Creds::generate_creds(password, iters);
+        let creds = Creds {
+            passwd_hash: Some((&hash[..]).into()),
+            passwd_salt: Some((&salt[..]).into()),
+            passwd_iters: iters as i32,
+            ..Default::default()
+        };
+        assert!(creds.verify_password(password), "failed to verify password");
     }
 }

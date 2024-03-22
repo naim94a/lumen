@@ -7,13 +7,19 @@ use_tls = false
 server_name = "lumen"
 
 # Allow clients to delete metadata from the database?
-allow_deletes = false
+allow_deletes = true
 # How many function histories should we return? 0=Disabled.
 get_history_limit = 50
 
+[users]
+# Enable guest accounts? disabling this will only allow IDA 8.1+ to connect.
+allow_guests = true
+# sets the amount of PBKDF2 iterations for storing passwords.
+pbkdf2_iterations = 120000
+
 # only required when `use_tls` is set to true.
 [lumina.tls]
-# Specify the server's certificate. 
+# Specify the server's certificate.
 # Clients connecting to the server must match this certificate.
 # If the certificate is password protected, the password can be specified in the `PKCSPASSWD` environment variable.
 server_cert = "path/to/server_crt"

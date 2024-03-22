@@ -34,11 +34,6 @@ async fn main() {
                 .help("Configuration file path")
         )
         .subcommand(
-            Command::new("passwd")
-                .about("Set a user's password")
-                .arg(Arg::new("username").required(true))
-        )
-        .subcommand(
             Command::new("users")
                 .about("User Management")
                 .subcommand(
@@ -65,6 +60,7 @@ async fn main() {
                         .arg(Arg::new("username"))
                 )
         )
+        .subcommand(Command::new("passwd").about("Set user password").arg(Arg::new("username").required(true)))
         .get_matches();
 
     let config = {
@@ -84,11 +80,11 @@ async fn main() {
                     let username = m.get_one::<String>("username").unwrap();
                     let email = m.get_one::<String>("email").unwrap();
                     let is_admin = *m.get_one::<bool>("is_admin").unwrap_or(&false);
-                    users.add_user(&username, email, is_admin).await;
+                    users.add_user(username, email, is_admin).await;
                 },
                 Some(("del", m)) => {
                     let username = m.get_one::<String>("username").unwrap();
-                    users.delete_user(&username).await;
+                    users.delete_user(username).await;
                 },
                 _ => unreachable!(),
             };

@@ -4,16 +4,12 @@ use crate::{
 };
 use log::*;
 use postgres_native_tls::MakeTlsConnector;
-
 use serde::Serialize;
-use sha2::Sha256;
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use tokio_postgres::{tls::MakeTlsConnect, NoTls, Socket};
 pub mod schema;
 mod schema_auto;
-
-use pbkdf2::{hmac::Hmac, pbkdf2};
 
 use diesel::{
     query_builder::{Query, QueryFragment},
@@ -178,7 +174,7 @@ impl Database {
     }
 
     pub async fn get_or_create_user<'a>(
-        &self, user: &'a crate::rpc::RpcHello<'a>, hostname: &str,
+        &self, user: &'a crate::rpc::RpcHello<'a>, cred_id: Option<i32>, hostname: &str,
     ) -> Result<i32, anyhow::Error> {
         use schema::users;
 
@@ -188,11 +184,18 @@ impl Database {
         let lic_data = user.license_data;
 
         let get_user = || {
-            users::table
+            let query = users::table
+                .into_boxed()
                 .select(users::id)
                 .filter(users::lic_data.eq(lic_data))
                 .filter(users::lic_id.eq(lic_id))
-                .filter(users::hostname.eq(hostname))
+                .filter(users::hostname.eq(hostname));
+
+            if let Some(cred_id) = cred_id {
+                query.filter(users::cred_id.eq(cred_id))
+            } else {
+                query.filter(users::cred_id.is_null())
+            }
         };
 
         match get_user().get_result::<i32>(conn).await {
@@ -206,6 +209,7 @@ impl Database {
                 users::lic_id.eq(lic_id),
                 users::lic_data.eq(lic_data),
                 users::hostname.eq(hostname),
+                users::cred_id.eq(cred_id),
             )])
             .returning(users::id) // xmax = 0 if the row is new
             .get_result::<i32>(conn)
@@ -256,7 +260,8 @@ impl Database {
     }
 
     async fn get_or_create_db<'a>(
-        &self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>,
+        &self, user: &'a crate::rpc::RpcHello<'a>, cred_id: Option<i32>,
+        funcs: &'a crate::rpc::PushMetadata<'a>,
     ) -> Result<i32, anyhow::Error> {
         use schema::dbs::{
             file_id as db_file_id, file_path, id as db_id, idb_path, table as dbs,
@@ -264,7 +269,7 @@ impl Database {
         };
 
         let file_id = self.get_or_create_file(funcs);
-        let user_id = self.get_or_create_user(user, funcs.hostname);
+        let user_id = self.get_or_create_user(user, cred_id, funcs.hostname);
 
         let (file_id, user_id): (i32, i32) = futures_util::try_join!(file_id, user_id)?;
 
@@ -306,15 +311,15 @@ impl Database {
     }
 
     pub async fn push_funcs<'a, 'b>(
-        &'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>,
-        scores: &[u32],
+        &'b self, user: &'a crate::rpc::RpcHello<'a>, cred_id: Option<i32>,
+        funcs: &'a crate::rpc::PushMetadata<'a>, scores: &[u32],
     ) -> Result<Vec<bool>, anyhow::Error> {
         use futures_util::TryStreamExt;
 
         // postgres has a limitation of binding per statement (i16::MAX). Split large push requests into smaller chunks.
         const PUSH_FUNC_CHUNK_SIZE: usize = 3000;
 
-        let db_id = self.get_or_create_db(user, funcs).await?;
+        let db_id = self.get_or_create_db(user, cred_id, funcs).await?;
 
         let mut rows = Vec::with_capacity(funcs.funcs.len().min(PUSH_FUNC_CHUNK_SIZE));
         let mut is_new = Vec::with_capacity(funcs.funcs.len());
@@ -483,27 +488,24 @@ impl Database {
         Ok(())
     }
 
-    pub async fn set_password(&self, username: &str, password: &str) -> Result<(), anyhow::Error> {
+    pub async fn set_password(
+        &self, username: &str, password: String, iters: u32,
+    ) -> Result<(), anyhow::Error> {
+        let (salt, hash) =
+            tokio::task::spawn_blocking(move || Creds::generate_creds(&password, iters)).await?;
+
         let db = &mut self.diesel.get().await?;
-
-        let salt: [u8; 12] = rand::random();
-        let mut hash = vec![0u8; 32];
-        let iters = 10_000;
-        pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt[..], iters, &mut hash)?;
-
-        let hash = hash;
-        let r = diesel::update(creds::table.filter(creds::username.eq(username)))
+        let rows = diesel::update(creds::table)
+            .filter(creds::username.eq(username))
             .set((
-                creds::passwd_hash.eq(hash),
                 creds::passwd_iters.eq(iters as i32),
-                creds::passwd_salt.eq(salt.to_vec()),
+                creds::passwd_salt.eq(&salt[..]),
+                creds::passwd_hash.eq(&hash[..]),
             ))
             .execute(db)
             .await?;
-        if r != 1 {
-            return Err(anyhow::anyhow!(
-                "failed to set user's password. expected a single row change."
-            ));
+        if rows != 1 {
+            return Err(anyhow::anyhow!("updated {rows} rows, expected to update 1"));
         }
         Ok(())
     }
@@ -520,6 +522,8 @@ impl Database {
                 passwd_salt: None,
                 passwd_iters: 10_000,
                 passwd_hash: None,
+                last_active: None,
+                is_enabled: true,
                 is_admin,
             })
             .returning(creds::id)
@@ -533,12 +537,28 @@ impl Database {
         &self, username: &str,
     ) -> Result<(i32, Creds), anyhow::Error> {
         let db = &mut self.diesel.get().await?;
-        let r: (i32, Creds) = creds::table
-            .filter(creds::username.eq(username))
+
+        Ok(creds::table
             .select((creds::id, Creds::as_select()))
-            .get_result(db)
+            .filter(creds::username.eq(username))
+            .get_result::<(i32, Creds)>(db)
+            .await?)
+    }
+
+    pub async fn get_user_by_id(&self, id: i32) -> Result<Creds, anyhow::Error> {
+        let db = &mut self.diesel.get().await?;
+
+        Ok(creds::table.select(Creds::as_select()).filter(creds::id.eq(id)).get_result(db).await?)
+    }
+
+    pub async fn update_last_active(&self, user_id: i32) -> Result<(), anyhow::Error> {
+        let mut db = self.diesel.get().await?;
+        diesel::update(schema::creds::table)
+            .filter(schema::creds::id.eq(user_id))
+            .set((schema::creds::last_active.eq(time::OffsetDateTime::now_utc()),))
+            .execute(&mut db)
             .await?;
-        Ok(r)
+        Ok(())
     }
 }
 

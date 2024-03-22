@@ -10,7 +10,7 @@ use std::{
 use common::{
     async_drop::AsyncDropper,
     config::Config,
-    db::Database,
+    db::{self, Database},
     make_pretty_hex, md,
     metrics::LuminaVersion,
     rpc::{self, Creds, Error, HelloResult, RpcFail, RpcHello, RpcMessage},
@@ -26,9 +26,46 @@ use tokio::{
 
 use crate::web;
 
+struct Session<'a> {
+    state: &'a SharedState_,
+    hello_msg: RpcHello<'a>,
+    _creds: db::schema::Creds<'a>,
+    creds_id: Option<i32>,
+    last_cred_check: Instant,
+}
+impl<'a> Session<'a> {
+    /// Check if the user changed in the database.
+    pub async fn is_valid(&mut self) -> bool {
+        let db = &self.state.db;
+        if let Some(cred_id) = self.creds_id {
+            if self.last_cred_check.elapsed() > Duration::from_secs(60 * 5) {
+                match db.get_user_by_id(cred_id).await {
+                    Ok(v) => {
+                        if !v.is_enabled
+                            || v.is_admin != self._creds.is_admin
+                            || v.passwd_salt != self._creds.passwd_salt
+                        {
+                            // user changed, force them to login again.
+                            return false;
+                        }
+                        self.last_cred_check = Instant::now();
+                        return true;
+                    },
+                    Err(err) => {
+                        error!("db error: {err}");
+                        return false;
+                    },
+                }
+            }
+        }
+        true
+    }
+}
+
 async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
-    state: &SharedState, user: &'a RpcHello<'a>, mut stream: S,
+    session: &mut Session<'a>, mut stream: S,
 ) -> Result<(), Error> {
+    let state = session.state;
     let db = &state.db;
     let server_name = state.server_name.as_str();
 
@@ -49,6 +86,11 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
         },
     };
     trace!("got command!");
+
+    if !session.is_valid().await {
+        return Err(Error::Timeout);
+    }
+
     let req = match RpcMessage::deserialize(&req) {
         Ok(v) => v,
         Err(err) => {
@@ -127,19 +169,20 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             let start = Instant::now();
             let scores: Vec<u32> = mds.funcs.iter().map(md::get_score).collect();
 
-            let status = match db.push_funcs(user, &mds, &scores).await {
-                Ok(v) => v.into_iter().map(u32::from).collect::<Vec<u32>>(),
-                Err(err) => {
-                    log::error!("push failed, db: {}", err);
-                    rpc::RpcMessage::Fail(rpc::RpcFail {
-                        code: 0,
-                        message: &format!("{server_name}: db error; please try again later.\n"),
-                    })
-                    .async_write(&mut stream)
-                    .await?;
-                    return Ok(());
-                },
-            };
+            let status =
+                match db.push_funcs(&session.hello_msg, session.creds_id, &mds, &scores).await {
+                    Ok(v) => v.into_iter().map(u32::from).collect::<Vec<u32>>(),
+                    Err(err) => {
+                        log::error!("push failed, db: {}", err);
+                        rpc::RpcMessage::Fail(rpc::RpcFail {
+                            code: 0,
+                            message: &format!("{server_name}: db error; please try again later.\n"),
+                        })
+                        .async_write(&mut stream)
+                        .await?;
+                        return Ok(());
+                    },
+                };
             state.metrics.pushes.inc_by(status.len() as _);
             let new_funcs =
                 status.iter().fold(0u64, |counter, &v| if v > 0 { counter + 1 } else { counter });
@@ -289,11 +332,12 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
         .get_or_create(&LuminaVersion { protocol_version: hello.protocol_version })
         .inc();
 
-    let creds = creds.unwrap_or(Creds { username: "guest".into(), password: "guest".into() });
+    let creds = creds.unwrap_or(Creds { username: "guest", password: "guest" });
 
     let user = if creds.username != "guest" {
-        let user = match state.db.get_user_by_username(creds.username).await {
+        match state.db.get_user_by_username(creds.username).await {
             Ok((user_id, db_creds)) if db_creds.verify_password(creds.password) => {
+                let _ = state.db.update_last_active(user_id).await;
                 info!("{} logged in successfully.", db_creds.username);
                 (user_id, db_creds)
             },
@@ -316,12 +360,28 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
                 .await?;
                 return Ok(());
             },
-        };
-        Some(user)
+        }
     } else {
-        // TODO: check if guest is enabled in config...
-        None
+        (
+            -1,
+            db::schema::Creds {
+                username: creds.username.into(),
+                is_enabled: state.config.users.allow_guests,
+                ..Default::default()
+            },
+        )
     };
+
+    if !user.1.is_enabled {
+        info!("attempt to login to disabled account [{}].", user.1.username);
+        rpc::RpcMessage::Fail(rpc::RpcFail {
+            code: 1,
+            message: &format!("{server_name}: account disabled."),
+        })
+        .async_write(&mut stream)
+        .await?;
+        return Ok(());
+    }
 
     let resp = match hello.protocol_version {
         0..=4 => rpc::RpcMessage::Ok(()),
@@ -330,17 +390,37 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
         5.. => {
             let mut features = 0;
 
-            if state.config.lumina.allow_deletes.unwrap_or(false) {
+            if user.1.is_admin {
+                features |= 0x01;
+            }
+
+            if user.0 != -1 && state.config.lumina.allow_deletes.unwrap_or(false) {
                 features |= 0x02;
             }
 
-            rpc::RpcMessage::HelloResult(HelloResult { features, ..Default::default() })
+            let last_active = user.1.last_active.map_or(0, |v| v.unix_timestamp() as u64);
+
+            rpc::RpcMessage::HelloResult(HelloResult {
+                username: Cow::Borrowed(&user.1.username),
+                last_active,
+                features,
+                ..Default::default()
+            })
         },
     };
     resp.async_write(&mut stream).await?;
 
+    let creds_id = if user.0 == -1 { None } else { Some(user.0) };
+    let mut session = Session {
+        state,
+        hello_msg: hello,
+        _creds: user.1,
+        creds_id,
+        last_cred_check: Instant::now(),
+    };
+
     loop {
-        handle_transaction(state, &hello, &mut stream).await?;
+        handle_transaction(&mut session, &mut stream).await?;
     }
 }
 

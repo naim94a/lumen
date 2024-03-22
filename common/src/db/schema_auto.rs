@@ -10,7 +10,10 @@ diesel::table! {
         passwd_salt -> Nullable<Bytea>,
         passwd_iters -> Int4,
         passwd_hash -> Nullable<Bytea>,
+        last_active -> Nullable<Timestamptz>,
+        creation_dt -> Timestamptz,
         is_admin -> Bool,
+        is_enabled -> Bool,
     }
 }
 
@@ -55,11 +58,19 @@ diesel::table! {
         #[max_length = 260]
         hostname -> Nullable<Varchar>,
         first_seen -> Nullable<Timestamptz>,
+        cred_id -> Nullable<Int4>,
     }
 }
 
 diesel::joinable!(dbs -> files (file_id));
 diesel::joinable!(dbs -> users (user_id));
 diesel::joinable!(funcs -> dbs (db_id));
+diesel::joinable!(users -> creds (cred_id));
 
-diesel::allow_tables_to_appear_in_same_query!(creds, dbs, files, funcs, users,);
+diesel::allow_tables_to_appear_in_same_query!(
+    creds,
+    dbs,
+    files,
+    funcs,
+    users,
+);
