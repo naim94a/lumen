@@ -7,12 +7,12 @@ edition = "2021"
 publish = false
 
 [dependencies]
-common = {path = "../common"}
-tokio = {version = "1.32", features = ["full"]}
-log = {version = "0.4", features = ["release_max_level_debug"]}
+common = { path = "../common" }
+tokio = { version = "1.39", features = ["full"] }
+log = { version = "0.4", features = ["release_max_level_debug"] }
 pretty_env_logger = "0.5"
-clap = "4.3"
+clap = "4.5"
 tokio-native-tls = "0.3"
-native-tls = {version = "0.2"}
+native-tls = { version = "0.2" }
 warp = "0.3"
-prometheus-client = "0.22.0"
+prometheus-client = "0.22"
