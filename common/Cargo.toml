@@ -7,7 +7,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tokio = { version = "1.39", features = ["full"], optional = true }
+tokio = { version = "1.40", features = ["full"], optional = true }
 log = { version = "0.4", features = ["release_max_level_debug"] }
 serde = { version = "1.0", features = ["derive"] }
 postgres-native-tls = { version = "0.5", optional = true }
