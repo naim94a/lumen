@@ -296,8 +296,8 @@ impl Database {
         Ok(get_db().get_result::<i32>(conn).await?)
     }
 
-    pub async fn push_funcs<'a, 'b>(
-        &'b self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>,
+    pub async fn push_funcs<'a>(
+        &self, user: &'a crate::rpc::RpcHello<'a>, funcs: &'a crate::rpc::PushMetadata<'a>,
         scores: &[u32],
     ) -> Result<Vec<bool>, anyhow::Error> {
         use futures_util::TryStreamExt;

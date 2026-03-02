@@ -1,4 +1,4 @@
-FROM rust:1.87.0-slim-bookworm
+FROM rust:1.93.1-slim-bookworm
 ARG	DEBIAN_FRONTEND=noninteractive
 RUN	apt-get update && apt-get install -y --no-install-recommends --no-install-suggests ca-certificates pkg-config libssl-dev libpq-dev
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse

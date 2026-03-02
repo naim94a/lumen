@@ -35,7 +35,7 @@ pub fn make_pretty_hex(data: &[u8]) -> String {
         let _ = write!(&mut output, " | ");
         for ch in chunk
             .iter()
-            .chain(std::iter::repeat(&b' ').take(padding))
+            .chain(std::iter::repeat_n(&b' ', padding))
             .map(|&v| std::char::from_u32(v as u32).unwrap_or('.'))
         {
             if !ch.is_ascii_graphic() {

@@ -78,7 +78,7 @@ pub fn from_slice<'a, T: Deserialize<'a>>(b: &'a [u8]) -> Result<(T, usize), Err
     Ok((v, b.len() - de.input.len()))
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
