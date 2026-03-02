@@ -18,6 +18,7 @@ pub enum Error {
     OutOfMemory,
     Todo,
     Timeout,
+    HttpReq,
     Eof,
 }
 
@@ -70,6 +71,13 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Err(Error::Eof), // client decided to disconnect...
         Err(e) => return Err(e.into()),
     }
+
+    const HTTP_VERBS: &[&[u8; 5]] =
+        &[b"GET /", b"POST ", b"HEAD ", b"DELET", b"PATCH", b"PUT /", b"OPTIO"];
+    if HTTP_VERBS.iter().any(|&v| head.eq_ignore_ascii_case(v)) {
+        return Err(Error::HttpReq);
+    }
+
     let code = head[4];
     let mut buf_len = [0u8; 4];
     buf_len.copy_from_slice(&head[..4]);

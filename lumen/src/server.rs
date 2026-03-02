@@ -14,7 +14,7 @@ use common::{
 use log::{debug, error, info, trace, warn};
 use native_tls::Identity;
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     time::timeout,
 };
@@ -319,9 +319,26 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, s: S) {
-    if let Err(err) = handle_client(state, s).await {
-        if discriminant(&err) != discriminant(&Error::Eof) {
+async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, mut s: S) {
+    if let Err(ref err) = handle_client(state, &mut s).await {
+        if discriminant(err) == discriminant(&Error::HttpReq) {
+            warn!("got http req");
+            const BAD_REQ_BODY: &str = include_str!("bad_req.html");
+
+            if s.write_all(
+                &format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nServer: lumen\r\nContent-Length: {}\r\n\r\n",
+                    BAD_REQ_BODY.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .is_ok()
+            {
+                let _ = s.write_all(BAD_REQ_BODY.as_bytes()).await;
+            }
+        }
+        if discriminant(err) != discriminant(&Error::Eof) {
             warn!("err: {}", err);
         }
     }
