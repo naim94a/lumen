@@ -406,7 +406,7 @@ async fn serve(
             let _guard = guard;
             let count = { counter.inc() + 1 };
             let protocol = if accpt.is_some() { " [TLS]" } else { "" };
-            debug!("Connection from {:?}{}: {} active connections", &addr, protocol, count);
+            debug!("Connection from {:?}{}: {} active connections", addr, protocol, count);
             match accpt {
                 Some(accpt) => {
                     match timeout(state.config.limits.tls_handshake_timeout, accpt.accept(client))
@@ -416,10 +416,10 @@ async fn serve(
                             Ok(s) => {
                                 handle_connection(&state, s).await;
                             },
-                            Err(err) => debug!("tls accept ({}): {}", &addr, err),
+                            Err(err) => debug!("tls accept ({}): {}", addr, err),
                         },
                         Err(_) => {
-                            debug!("client {} didn't complete ssl handshake in time.", &addr);
+                            debug!("client {} didn't complete ssl handshake in time.", addr);
                         },
                     };
                 },
@@ -455,7 +455,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
     let web_handle = if let Some(ref webcfg) = state.config.api_server {
         let bind_addr = webcfg.bind_addr;
         let state = state.clone();
-        info!("starting http api server on {:?}", &bind_addr);
+        info!("starting http api server on {:?}", bind_addr);
         Some(tokio::spawn(async move {
             web::start_webserver(bind_addr, state).await;
         }))

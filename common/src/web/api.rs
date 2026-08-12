@@ -29,13 +29,13 @@ impl std::fmt::Display for Md5 {
         let mut out = [0u8; 32];
         binascii::bin2hex(&self.0, &mut out).unwrap();
         let out = std::str::from_utf8(&out).unwrap();
-        write!(f, "{}", &out)
+        write!(f, "{}", out)
     }
 }
 
 impl Serialize for Md5 {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{}", &self))
+        serializer.serialize_str(&format!("{}", self))
     }
 }
 
@@ -68,7 +68,7 @@ async fn view_file_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
     let v = match state.db.get_file_funcs(&md5.0[..], 0, 10_000).await {
         Ok(v) => v,
         Err(err) => {
-            error!("failed to get file's funcs {}: {}", &md5, err);
+            error!("failed to get file's funcs {}: {}", md5, err);
             return Ok(warp::reply::json(&Error { error: "internal server error" }));
         },
     };
@@ -142,7 +142,7 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
             let md = match crate::md::parse_metadata(&v.data) {
                 Ok(v) => v,
                 Err(e) => {
-                    error!("error parsing metadata for {}: {}", &md5, e);
+                    error!("error parsing metadata for {}: {}", md5, e);
                     return None;
                 },
             };
