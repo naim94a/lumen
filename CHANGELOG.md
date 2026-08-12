@@ -2,6 +2,15 @@
 
 ## [Unreleased] - _TBD_
 
+### Added
+
+- Support for multiple Lumina listeners, each independently configured for TLS or plain TCP.
+
+### Changed
+
+- Lumina listener configuration now uses `[[lumina.listeners]]`. Each listener requires a `bind_addr`; adding `[lumina.listeners.tls]` with `server_cert` enables TLS for that listener.
+- The former `[lumina]` `bind_addr`, `use_tls`, and `[lumina.tls]` settings have been removed. Existing configurations must be migrated to the per-listener format.
+
 ## [v0.4.0] - 2024-03-19
 
 ### Added
