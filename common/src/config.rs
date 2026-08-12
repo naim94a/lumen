@@ -9,10 +9,15 @@ pub struct TlsIdentity {
 }
 
 #[derive(Deserialize)]
-pub struct LuminaServer {
+pub struct LuminaListener {
     pub bind_addr: SocketAddr,
-    pub use_tls: Option<bool>,
+    /// Supplying a certificate enables TLS for this listener; omitting it enables plain TCP.
     pub tls: Option<TlsIdentity>,
+}
+
+#[derive(Deserialize)]
+pub struct LuminaServer {
+    pub listeners: Vec<LuminaListener>,
     pub server_name: Option<String>,
     pub allow_deletes: Option<bool>,
 

@@ -12,10 +12,10 @@ use_default_config(){
     echo "No custom config.toml found, creating secure default."
     tee /lumen/config.toml <<- EOF > /dev/null
 	[lumina]
-	bind_addr = "0.0.0.0:1234"
-	use_tls = true
 	server_name = "lumen"
-	[lumina.tls]
+	[[lumina.listeners]]
+	bind_addr = "0.0.0.0:1234"
+	[lumina.listeners.tls]
 	server_cert = "${KEYPATH}"
 	[database]
 	connection_info = "host=db port=5432 user=lumina password=1"
@@ -53,7 +53,7 @@ setup_config(){
     if [ -e $CFGPATH/config.toml ] ; then
         echo "Detected custom config.toml"
         cp $CFGPATH/config.toml /lumen/config.toml ;
-        if grep use_tls /lumen/config.toml | head -1 | grep -q false ; then
+        if ! grep -q 'server_cert' /lumen/config.toml ; then
             echo "Starting lumen without TLS.  Make sure to set LUMINA_TLS = NO in ida.cfg" ;
         else
 	    setup_tls_key ;

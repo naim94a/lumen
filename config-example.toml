@@ -1,22 +1,25 @@
 [lumina]
-# address that lumen will listen on for IDA to connect to
-bind_addr = "0.0.0.0:1234"
-# indicates if TLS should be used for connections, if true the `lumina.tls` section is required.
-use_tls = false
 # server display name; appears in IDA output window
 server_name = "lumen"
+
+# Each listener accepts either TLS or plain TCP. TLS is enabled for a listener
+# by adding its `tls` table; omit it to accept plain TCP.
+[[lumina.listeners]]
+bind_addr = "0.0.0.0:1234"
+
+# Example of an additional TLS listener:
+# [[lumina.listeners]]
+# bind_addr = "0.0.0.0:1235"
+# [lumina.listeners.tls]
+# Specify the server's PKCS#12 certificate. Clients connecting to this listener
+# must match this certificate. Set `PKCSPASSWD` if the certificate is password-protected.
+# server_cert = "path/to/server_crt"
 
 # Allow clients to delete metadata from the database?
 allow_deletes = false
 # How many function histories should we return? 0=Disabled.
 get_history_limit = 50
 
-# only required when `use_tls` is set to true.
-[lumina.tls]
-# Specify the server's certificate. 
-# Clients connecting to the server must match this certificate.
-# If the certificate is password protected, the password can be specified in the `PKCSPASSWD` environment variable.
-server_cert = "path/to/server_crt"
 
 [database]
 # Specifies a postgresql connection string. All variables can be found here: https://docs.rs/tokio-postgres/0.6.0/tokio_postgres/config/struct.Config.html
