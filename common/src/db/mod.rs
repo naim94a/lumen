@@ -1,10 +1,10 @@
 use crate::async_drop::{AsyncDropGuard, AsyncDropper};
-use log::*;
 use postgres_native_tls::MakeTlsConnector;
 use serde::Serialize;
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use tokio_postgres::{tls::MakeTlsConnect, NoTls, Socket};
+use tracing::{debug, error, trace};
 pub mod schema;
 mod schema_auto;
 
@@ -64,13 +64,13 @@ impl Database {
         T::Stream: Send + 'static,
     {
         let (cli, conn) = tokio_postgres::connect(db_url, tls).await.map_err(|e| {
-            error!("failed to connect db: {e}");
+            error!(error = %e, "failed to connect to database");
             diesel::result::ConnectionError::BadConnection(format!("{e}"))
         })?;
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
-                error!("connection task error: {e}");
+                error!(error = %e, "database connection task failed");
             }
         });
 
@@ -163,7 +163,7 @@ impl Database {
         let res: Vec<Option<FunctionInfo>> =
             chksums.iter().map(|&chksum| partial.remove(chksum)).collect();
 
-        trace!("found {}/{} results", results, chksums.len());
+        trace!(found = results, requested = chksums.len(), "metadata lookup completed");
         debug_assert_eq!(chksums.len(), res.len());
         Ok(res)
     }
@@ -403,7 +403,7 @@ impl Database {
         let token = conn.cancel_token();
         let tls_connector = self.tls_connector.clone();
         self.dropper.defer(async move {
-            debug!("cancelling query...");
+            debug!(tls = tls_connector.is_some(), "cancelling database query");
 
             if let Some(tls) = tls_connector {
                 let _ = token.cancel_query(tls).await;
@@ -424,7 +424,7 @@ impl Database {
         let rows_modified =
             diesel::delete(funcs.filter(chksum.eq_any(&chksums))).execute(conn).await?;
 
-        debug!("deleted {rows_modified} rows");
+        debug!(rows_modified, "deleted metadata rows");
 
         Ok(())
     }

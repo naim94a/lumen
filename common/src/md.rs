@@ -155,7 +155,7 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
                 let byte_comments: Vec<(_, &[u8])> = match deserialize_seq(data) {
                     Ok(v) => v,
                     Err(err) => {
-                        log::error!("err: {}\n{}", err, super::make_pretty_hex(data));
+                        tracing::error!(error = %err, data = %super::make_pretty_hex(data), "failed to parse byte comments");
                         return Err(err);
                     },
                 };
@@ -174,7 +174,7 @@ pub fn parse_metadata(mut data: &[u8]) -> Result<Vec<FunctionMetadata<'_>>, crat
                 let byte_comments: Vec<(_, (&[u8], &[u8]))> = match deserialize_seq(data) {
                     Ok(v) => v,
                     Err(err) => {
-                        log::error!("err: {}\n{}", err, super::make_pretty_hex(data));
+                        tracing::error!(error = %err, data = %super::make_pretty_hex(data), "failed to parse extra comments");
                         return Err(err);
                     },
                 };
@@ -203,7 +203,7 @@ pub fn get_score(md: &crate::rpc::PushMetadataFunc) -> u32 {
     let md = match parse_metadata(md.func_data) {
         Ok(v) => v,
         Err(e) => {
-            log::warn!("failed to parse metadata: {}", e);
+            tracing::warn!(error = %e, "failed to parse metadata for scoring");
             return 0;
         },
     };

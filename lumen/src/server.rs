@@ -11,13 +11,13 @@ use common::{
     rpc::{self, Error, HelloResult, RpcFail, RpcHello, RpcMessage},
     SharedState, SharedState_,
 };
-use log::{debug, error, info, trace, warn};
 use native_tls::Identity;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
     time::timeout,
 };
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 
 use crate::web;
 
@@ -27,7 +27,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
     let db = &state.db;
     let server_name = state.server_name.as_str();
 
-    trace!("waiting for command..");
+    trace!("waiting for client command");
     let req =
         match timeout(state.config.limits.command_timeout, rpc::read_packet(&mut stream)).await {
             Ok(res) => match res {
@@ -44,12 +44,12 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 return Err(Error::Timeout);
             },
         };
-    trace!("got command!");
+    trace!("received client command");
     let req = match RpcMessage::deserialize(&req) {
         Ok(v) => v,
         Err(err) => {
-            warn!("bad message: \n{}\n", make_pretty_hex(&req));
-            error!("failed to process rpc message: {}", err);
+            warn!(packet = %make_pretty_hex(&req), "received malformed RPC message");
+            error!(error = %err, "failed to deserialize RPC message");
             let resp = rpc::RpcFail {
                 code: 0,
                 message: &format!("{server_name}: error: invalid data.\n"),
@@ -63,41 +63,43 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
     match req {
         RpcMessage::PullMetadata(md) => {
             let start = Instant::now();
-            let funcs =
-                match timeout(state.config.limits.pull_md_timeout, db.get_funcs(&md.funcs)).await {
-                    Ok(r) => match r {
-                        Ok(v) => v,
-                        Err(e) => {
-                            error!("pull failed, db: {}", e);
-                            rpc::RpcMessage::Fail(rpc::RpcFail {
-                                code: 0,
-                                message: &format!(
-                                    "{server_name}:  db error; please try again later..\n"
-                                ),
-                            })
-                            .async_write(&mut stream)
-                            .await?;
-                            return Ok(());
-                        },
-                    },
-                    Err(_) => {
-                        RpcMessage::Fail(RpcFail {
+            let funcs = match timeout(state.config.limits.pull_md_timeout, db.get_funcs(&md.funcs))
+                .await
+            {
+                Ok(r) => match r {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!(error = %e, requested_functions = md.funcs.len(), "failed to pull metadata from database");
+                        rpc::RpcMessage::Fail(rpc::RpcFail {
                             code: 0,
-                            message: &format!("{server_name}: query took too long to execute.\n"),
+                            message: &format!(
+                                "{server_name}:  db error; please try again later..\n"
+                            ),
                         })
                         .async_write(&mut stream)
                         .await?;
-                        debug!("pull query timeout");
-                        return Err(Error::Timeout);
+                        return Ok(());
                     },
-                };
+                },
+                Err(_) => {
+                    RpcMessage::Fail(RpcFail {
+                        code: 0,
+                        message: &format!("{server_name}: query took too long to execute.\n"),
+                    })
+                    .async_write(&mut stream)
+                    .await?;
+                    debug!(timeout = ?state.config.limits.pull_md_timeout, "metadata pull timed out");
+                    return Err(Error::Timeout);
+                },
+            };
             let pulled_funcs = funcs.iter().filter(|v| v.is_some()).count();
             state.metrics.pulls.inc_by(pulled_funcs as _);
             state.metrics.queried_funcs.inc_by(md.funcs.len() as _);
             debug!(
-                "pull {pulled_funcs}/{} funcs ended after {:?}",
-                md.funcs.len(),
-                start.elapsed()
+                pulled_functions = pulled_funcs,
+                requested_functions = md.funcs.len(),
+                elapsed = ?start.elapsed(),
+                "metadata pull completed"
             );
 
             let statuses: Vec<u32> = funcs.iter().map(|v| u32::from(v.is_none())).collect();
@@ -127,7 +129,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
             let status = match db.push_funcs(user, &mds, &scores).await {
                 Ok(v) => v.into_iter().map(u32::from).collect::<Vec<u32>>(),
                 Err(err) => {
-                    log::error!("push failed, db: {}", err);
+                    error!(error = %err, pushed_functions = mds.funcs.len(), "failed to push metadata to database");
                     rpc::RpcMessage::Fail(rpc::RpcFail {
                         code: 0,
                         message: &format!("{server_name}: db error; please try again later.\n"),
@@ -142,9 +144,10 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 status.iter().fold(0u64, |counter, &v| if v > 0 { counter + 1 } else { counter });
             state.metrics.new_funcs.inc_by(new_funcs);
             debug!(
-                "push {} funcs ended after {:?} ({new_funcs} new)",
-                status.len(),
-                start.elapsed()
+                pushed_functions = status.len(),
+                new_functions = new_funcs,
+                elapsed = ?start.elapsed(),
+                "metadata push completed"
             );
 
             RpcMessage::PushMetadataResult(rpc::PushMetadataResult { status: Cow::Owned(status) })
@@ -162,7 +165,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 .await?;
             } else {
                 if let Err(err) = db.delete_metadata(&req).await {
-                    error!("delete failed. db: {err}");
+                    error!(error = %err, requested_functions = req.funcs.len(), "failed to delete metadata");
                     RpcMessage::Fail(rpc::RpcFail {
                         code: 3,
                         message: &format!("{server_name}: db error, please try again later."),
@@ -199,7 +202,7 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 let history = match db.get_func_histories(chksum, limit).await {
                     Ok(v) => v,
                     Err(err) => {
-                        error!("failed to get function histories: {err:?}");
+                        error!(error = ?err, requested_functions = req.funcs.len(), "failed to retrieve function histories");
                         RpcMessage::Fail(rpc::RpcFail {
                             code: 3,
                             message: &format!("{server_name}: db error, please try again later."),
@@ -229,7 +232,11 @@ async fn handle_transaction<'a, S: AsyncRead + AsyncWrite + Unpin>(
                 res.push(rpc::FunctionHistories { log: Cow::Owned(log) });
             }
 
-            trace!("returning {} histories", res.len());
+            trace!(
+                returned_histories = res.len(),
+                requested_functions = req.funcs.len(),
+                "function history lookup completed"
+            );
 
             RpcMessage::GetFuncHistoriesResult(rpc::GetFuncHistoriesResult {
                 status: statuses.into(),
@@ -256,23 +263,28 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     state: &SharedState, mut stream: S,
 ) -> Result<(), rpc::Error> {
     let server_name = &state.server_name;
-    let hello =
-        match timeout(state.config.limits.hello_timeout, rpc::read_packet(&mut stream)).await {
-            Ok(v) => v?,
-            Err(_) => {
-                debug!("didn't get hello in time.");
-                return Ok(());
-            },
-        };
+    let hello = match timeout(state.config.limits.hello_timeout, rpc::read_packet(&mut stream))
+        .await
+    {
+        Ok(v) => v?,
+        Err(_) => {
+            debug!(timeout = ?state.config.limits.hello_timeout, "client did not send hello before timeout");
+            return Ok(());
+        },
+    };
 
     let (hello, creds) = match RpcMessage::deserialize(&hello) {
         Ok(RpcMessage::Hello(v, creds)) => {
-            debug!("hello protocol={}, login creds: {creds:?}", v.protocol_version);
+            debug!(
+                protocol_version = v.protocol_version,
+                has_credentials = creds.is_some(),
+                "received client hello"
+            );
             (v, creds)
         },
         _ => {
             // send error
-            error!("got bad hello message");
+            error!("received invalid client hello");
 
             let resp = rpc::RpcFail { code: 0, message: &format!("{server_name}: bad sequence.") };
             let resp = rpc::RpcMessage::Fail(resp);
@@ -322,7 +334,7 @@ async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
 async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedState, mut s: S) {
     if let Err(ref err) = handle_client(state, &mut s).await {
         if discriminant(err) == discriminant(&Error::HttpReq) {
-            warn!("got http req");
+            warn!("received HTTP request on Lumina listener");
             const BAD_REQ_BODY: &str = include_str!("bad_req.html");
 
             if s.write_all(
@@ -339,7 +351,7 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedStat
             }
         }
         if discriminant(err) != discriminant(&Error::Eof) {
-            warn!("err: {}", err);
+            warn!(error = %err, "client connection failed");
         }
     }
 }
@@ -362,10 +374,10 @@ async fn serve(
         let (client, addr) = tokio::select! {
             _ = &mut shutdown_signal => {
                 drop(state);
-                info!("shutting down...");
+                info!("shutting down listener");
                 let m = connections.lock().await;
                 m.iter().for_each(|(k, v)| {
-                    debug!("aborting task for {k}...");
+                    debug!(client_addr = %k, "aborting active client connection");
                     v.abort();
                 });
                 return;
@@ -373,7 +385,7 @@ async fn serve(
             res = listener.accept() => match res {
                 Ok(v) => v,
                 Err(err) => {
-                    warn!("failed to accept(): {}", err);
+                    warn!(error = %err, "failed to accept client connection");
                     continue;
                 }
             },
@@ -384,30 +396,34 @@ async fn serve(
         let state = state.clone();
         let accpt = accpt.clone();
 
+        let tls = accpt.is_some();
+        let connection_span = info_span!("connection", client_addr = %addr, tls);
+
         let conns2 = connections.clone();
         let counter = state.metrics.active_connections.clone();
+        let close_span = connection_span.clone();
         let guard = async_drop.defer(async move {
             let count = counter.dec() - 1;
             debug!(
-                "connection with {:?} ended after {:?}; {} active connections",
-                addr,
-                start.elapsed(),
-                count
+                parent: &close_span,
+                elapsed = ?start.elapsed(),
+                active_connections = count,
+                "client connection closed"
             );
 
             let mut guard = conns2.lock().await;
             if guard.remove(&addr).is_none() {
-                error!("Couldn't remove connection from set {addr}");
+                error!(parent: &close_span, "connection was not registered during cleanup");
             }
         });
 
         let counter = state.metrics.active_connections.clone();
-        let handle = tokio::spawn(async move {
-            let _guard = guard;
-            let count = { counter.inc() + 1 };
-            let protocol = if accpt.is_some() { " [TLS]" } else { "" };
-            debug!("Connection from {:?}{}: {} active connections", addr, protocol, count);
-            match accpt {
+        let handle = tokio::spawn(
+            async move {
+                let _guard = guard;
+                let count = { counter.inc() + 1 };
+                debug!(active_connections = count, "accepted client connection");
+                match accpt {
                 Some(accpt) => {
                     match timeout(state.config.limits.tls_handshake_timeout, accpt.accept(client))
                         .await
@@ -416,16 +432,24 @@ async fn serve(
                             Ok(s) => {
                                 handle_connection(&state, s).await;
                             },
-                            Err(err) => debug!("tls accept ({}): {}", addr, err),
+                            Err(err) => {
+                                debug!(client_addr = %addr, error = %err, "TLS handshake failed")
+                            },
                         },
                         Err(_) => {
-                            debug!("client {} didn't complete ssl handshake in time.", addr);
+                            debug!(
+                                client_addr = %addr,
+                                timeout = ?state.config.limits.tls_handshake_timeout,
+                                "TLS handshake timed out"
+                            );
                         },
                     };
                 },
-                None => handle_connection(&state, client).await,
+                    None => handle_connection(&state, client).await,
+                }
             }
-        });
+            .instrument(connection_span),
+        );
 
         let mut guard = connections.lock().await;
         guard.insert(addr, handle);
@@ -433,12 +457,12 @@ async fn serve(
 }
 
 pub(crate) async fn do_lumen(config: Arc<Config>) {
-    info!("starting private lumen server...");
+    info!("starting private Lumina server");
 
     let db = match Database::open(&config.database).await {
         Ok(v) => v,
         Err(err) => {
-            error!("failed to open database: {}", err);
+            error!(error = %err, "failed to open database");
             exit(1);
         },
     };
@@ -455,7 +479,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
     let web_handle = if let Some(ref webcfg) = state.config.api_server {
         let bind_addr = webcfg.bind_addr;
         let state = state.clone();
-        info!("starting http api server on {:?}", bind_addr);
+        info!(bind_addr = %bind_addr, "starting HTTP API server");
         Some(tokio::spawn(async move {
             web::start_webserver(bind_addr, state).await;
         }))
@@ -464,7 +488,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
     };
 
     if state.config.lumina.listeners.is_empty() {
-        error!("at least one lumina listener must be configured");
+        error!("no Lumina listeners are configured");
         exit(1);
     }
 
@@ -475,7 +499,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
             let mut cert = match std::fs::read(&tls.server_cert) {
                 Ok(v) => v,
                 Err(err) => {
-                    error!("failed to read certificate file: {err}");
+                    error!(cert_path = %tls.server_cert.display(), error = %err, "failed to read TLS certificate");
                     exit(1);
                 },
             };
@@ -483,7 +507,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
             let identity = match Identity::from_pkcs12(&cert, &password) {
                 Ok(v) => v,
                 Err(err) => {
-                    error!("failed to parse TLS certificate: {err}");
+                    error!(cert_path = %tls.server_cert.display(), error = %err, "failed to parse TLS certificate");
                     exit(1);
                 },
             };
@@ -493,7 +517,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
             match acceptor.build() {
                 Ok(v) => Some(tokio_native_tls::TlsAcceptor::from(v)),
                 Err(err) => {
-                    error!("failed to build TLS acceptor: {err}");
+                    error!(cert_path = %tls.server_cert.display(), error = %err, "failed to build TLS acceptor");
                     exit(1);
                 },
             }
@@ -504,11 +528,11 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
         let server = match TcpListener::bind(listener.bind_addr).await {
             Ok(v) => v,
             Err(err) => {
-                error!("failed to bind listener on {}: {err}", listener.bind_addr);
+                error!(bind_addr = %listener.bind_addr, error = %err, "failed to bind Lumina listener");
                 exit(1);
             },
         };
-        info!("listening on {:?} secure={}", server.local_addr().unwrap(), tls_acceptor.is_some());
+        info!(bind_addr = %server.local_addr().unwrap(), tls = tls_acceptor.is_some(), "Lumina listener ready");
 
         let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
         shutdown_senders.push(shutdown_sender);
@@ -519,7 +543,7 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
     }
 
     tokio::signal::ctrl_c().await.unwrap();
-    debug!("CTRL-C; exiting...");
+    debug!("received shutdown signal");
     if let Some(handle) = web_handle {
         handle.abort();
     }
@@ -530,5 +554,5 @@ pub(crate) async fn do_lumen(config: Arc<Config>) {
         handle.await.unwrap();
     }
 
-    info!("Goodbye.");
+    info!("Lumina server stopped");
 }

@@ -1,6 +1,6 @@
 use futures_util::{future::BoxFuture, Future};
-use log::trace;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender, WeakUnboundedSender};
+use tracing::trace;
 
 enum AsyncDropperMsg {
     Future(BoxFuture<'static, ()>),
@@ -17,7 +17,7 @@ impl AsyncDropper {
     #[track_caller]
     pub fn new() -> (AsyncDropper, impl Future<Output = ()> + 'static) {
         let orig = format!("{}", std::panic::Location::caller());
-        trace!("new dropper '{orig}'");
+        trace!(origin = %orig, "created async dropper");
 
         let (tx, mut rx) = unbounded_channel();
         let fut = async move {
@@ -27,12 +27,12 @@ impl AsyncDropper {
                         fut.await;
                     },
                     AsyncDropperMsg::Termination => {
-                        trace!("term received for '{orig}'...");
+                        trace!(origin = %orig, "terminating async dropper");
                         break;
                     },
                 }
             }
-            trace!("dropper '{orig}' exited.");
+            trace!(origin = %orig, "async dropper exited");
         };
 
         (Self { tx }, fut)

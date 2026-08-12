@@ -1,6 +1,6 @@
-use log::*;
 use serde::Serialize;
 use std::borrow::Cow;
+use tracing::error;
 use warp::{Filter, Rejection, Reply};
 
 use super::SharedState;
@@ -68,7 +68,7 @@ async fn view_file_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
     let v = match state.db.get_file_funcs(&md5.0[..], 0, 10_000).await {
         Ok(v) => v,
         Err(err) => {
-            error!("failed to get file's funcs {}: {}", md5, err);
+            error!(file_md5 = %md5, error = %err, "failed to retrieve file functions");
             return Ok(warp::reply::json(&Error { error: "internal server error" }));
         },
     };
@@ -119,7 +119,7 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
     let (files_with, files_info) = match futures_util::try_join!(files_with, files_info) {
         Ok(v) => v,
         Err(err) => {
-            error!("failed to execute db queries: {}", err);
+            error!(error = %err, "failed to retrieve function metadata");
             return Ok(warp::reply::json(&Error { error: "internal server error" }));
         },
     };
@@ -142,7 +142,7 @@ async fn view_func_by_hash(state: SharedState, md5: Md5) -> Result<impl Reply, R
             let md = match crate::md::parse_metadata(&v.data) {
                 Ok(v) => v,
                 Err(e) => {
-                    error!("error parsing metadata for {}: {}", md5, e);
+                    error!(function_md5 = %md5, error = %e, "failed to parse function metadata");
                     return None;
                 },
             };
