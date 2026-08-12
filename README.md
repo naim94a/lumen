@@ -101,6 +101,23 @@ LUMINA_TLS = NO
 
 ### Configuring TLS
 
+A listener is plain TCP unless its `tls` table includes a certificate. This permits both connection types on separate ports:
+
+```toml
+[lumina]
+server_name = "lumen"
+
+[[lumina.listeners]]
+bind_addr = "0.0.0.0:1234" # TLS
+[lumina.listeners.tls]
+server_cert = "lumen.p12"
+
+[[lumina.listeners]]
+bind_addr = "0.0.0.0:1235" # plain TCP
+```
+
+Configure TLS-capable IDA clients to use port `1234`; configure plain clients to use port `1235` and set `LUMINA_TLS = NO`.
+
 IDA Pro uses a pinned certificate for Lumina's communcation, so adding a self-signed certificate to your root certificates won't work.
 Luckily, we can override the hard-coded public key by writing a DER-base64 encoded certificate to "hexrays.crt" in IDA's install directory.
 
