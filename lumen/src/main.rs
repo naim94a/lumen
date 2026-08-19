@@ -5,7 +5,7 @@
 #![deny(clippy::all)]
 
 use clap::Arg;
-use log::*;
+
 use server::do_lumen;
 use std::sync::Arc;
 
@@ -14,16 +14,18 @@ mod web;
 
 use common::config;
 
-fn setup_logger() {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", concat!(env!("CARGO_PKG_NAME"), "=info"));
-    }
-    pretty_env_logger::init_timed();
+fn setup_tracing() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "lumen=info,common=info".into()),
+        )
+        .init();
 }
 
 #[tokio::main]
 async fn main() {
-    setup_logger();
+    setup_tracing();
     let matches = clap::Command::new("lumen")
         .version(env!("CARGO_PKG_VERSION"))
         .about("lumen is a private Lumina server for IDA.\nVisit https://github.com/naim94a/lumen/ for updates.")

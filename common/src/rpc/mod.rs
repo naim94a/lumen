@@ -1,5 +1,5 @@
-use log::*;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::{error, info, trace};
 pub(crate) mod de;
 mod messages;
 mod packing;
@@ -51,7 +51,7 @@ impl From<std::str::Utf8Error> for Error {
 }
 impl From<std::collections::TryReserveError> for Error {
     fn from(v: std::collections::TryReserveError) -> Self {
-        error!("failed to allocate {} bytes", v);
+        error!(error = %v, "failed to allocate packet buffer");
         Error::OutOfMemory
     }
 }
@@ -94,7 +94,12 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
     let max_len = get_code_maxlen(code);
 
     if buf_len > max_len {
-        info!("maxium size exceeded: code={}: max={}; req={}", code, max_len, buf_len);
+        info!(
+            message_code = format_args!("0x{code:02x}"),
+            max_len,
+            requested_len = buf_len,
+            "packet exceeds configured size limit"
+        );
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "request length exceeded maximum limit",
@@ -103,7 +108,11 @@ pub async fn read_packet<R: AsyncRead + Unpin>(mut reader: R) -> Result<Vec<u8>,
     }
 
     // the additional byte is for the RPC code
-    trace!("expecting {} bytes...", buf_len);
+    trace!(
+        message_code = format_args!("0x{code:02x}"),
+        payload_len = buf_len,
+        "reading RPC packet"
+    );
     let buf_len = buf_len + 1;
 
     let mut data = Vec::new();
@@ -175,9 +184,10 @@ impl<'a> RpcMessage<'a> {
         if v.1 != payload.len() {
             let bytes_remaining = crate::make_pretty_hex(&payload[v.1..]);
             trace!(
-                "{} remaining bytes after deserializing {}\n{bytes_remaining}",
-                payload.len() - v.1,
-                std::any::type_name::<T>()
+                remaining_len = payload.len() - v.1,
+                message_type = std::any::type_name::<T>(),
+                remaining_bytes = %bytes_remaining,
+                "trailing bytes after RPC deserialization"
             );
         }
         Ok(v.0)
@@ -190,10 +200,7 @@ impl<'a> RpcMessage<'a> {
         let res = match msg_type {
             0x0a => {
                 if !payload.is_empty() {
-                    trace!(
-                        "Ok message with additional data: {} bytes: {payload:02x?}",
-                        payload.len()
-                    );
+                    trace!(extra_len = payload.len(), extra_bytes = ?payload, "OK message has trailing data");
                 }
                 RpcMessage::Ok(())
             },
@@ -205,12 +212,12 @@ impl<'a> RpcMessage<'a> {
                     let payload = &payload[consumed..];
                     let (creds, consumed) = de::from_slice::<Creds>(payload)?;
                     if payload.len() != consumed {
-                        trace!("bytes remaining after HelloV2: {payload:02x?}");
+                        trace!(remaining_len = payload.len() - consumed, remaining_bytes = ?payload, "trailing bytes after HelloV2");
                     }
                     Some(creds)
                 } else {
                     if hello.protocol_version > 2 || payload.len() != consumed {
-                        trace!("Unexpected Hello msg: {payload:02x?}");
+                        trace!(protocol_version = hello.protocol_version, payload_len = payload.len(), consumed_len = consumed, payload = ?payload, "unexpected Hello payload");
                     }
                     None
                 };
@@ -226,7 +233,7 @@ impl<'a> RpcMessage<'a> {
             0x30 => RpcMessage::GetFuncHistoriesResult(Self::deserialize_check(payload)?),
             0x31 => RpcMessage::HelloResult(Self::deserialize_check(payload)?),
             _ => {
-                trace!("got invalid message type '{:02x}'", msg_type);
+                trace!(message_code = format_args!("0x{msg_type:02x}"), "invalid RPC message type");
                 return Err(Error::InvalidData);
             },
         };

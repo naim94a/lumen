@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use common::{web::api::api_root, SharedState};
-use log::error;
+use tracing::error;
 use warp::{hyper::StatusCode, reply::Response, Filter};
 
 pub async fn start_webserver<A: Into<SocketAddr> + 'static>(
@@ -18,7 +18,7 @@ pub async fn start_webserver<A: Into<SocketAddr> + 'static>(
         if let Err(err) =
             prometheus_client::encoding::text::encode(&mut res, &shared_state.metrics.registry)
         {
-            error!("failed to encode metrics: {err}");
+            error!(error = %err, "failed to encode Prometheus metrics");
             let mut r = Response::default();
             *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             r
