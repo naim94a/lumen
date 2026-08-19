@@ -339,7 +339,7 @@ async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(state: &SharedStat
 
             if s.write_all(
                 format!(
-                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\nServer: lumen\r\nContent-Length: {}\r\n\r\n",
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nServer: lumen\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     BAD_REQ_BODY.len()
                 )
                 .as_bytes(),
