@@ -1,5 +1,8 @@
-<html>
+<!doctype html>
+<html lang="en">
     <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>lumen</title>
         <style>
             body {
@@ -44,9 +47,8 @@
             a:hover {
                 text-decoration: underline;
             }
-            ul {
-                list-style-type: none;
-                padding: 0;
+            ol {
+                padding-left: 24px;
             }
             li {
                 margin-bottom: 8px;
@@ -57,27 +59,27 @@
         <div class="container">
             <h1>Lumen Server</h1>
             <p>
-                You have reached a port dedicated to the
-                <strong>Lumina protocol</strong>, specifically for the
-                <a href="https://github.com/naim94a/lumen">Lumen</a> server.
-                This server is <em>not</em> a standard HTTP server and cannot be
-                browsed directly at this port.
+                This port speaks the <strong>Lumina protocol</strong>, not HTTP.
+                You have reached a
+                <a href="https://github.com/naim94a/lumen">Lumen</a> server,
+                which cannot be browsed directly at this port.
             </p>
             <p>
                 To utilize Lumen, you need to configure your IDA Pro instance to
                 connect to this server. Please follow these steps:
             </p>
-            <ul>
-                <li>1. Open IDA Pro.</li>
+            <ol>
+                <li>Open IDA Pro.</li>
+                <li>Open the Lumina configuration.</li>
                 <li>
-                    2. Go to <code>Edit &gt; Lumina &gt; Configure...</code>
+                    In the configuration dialog, enter the IP address (or
+                    hostname) and port shown in your browser's address bar.
                 </li>
                 <li>
-                    3. In the configuration dialog, enter the IP address (or
-                    hostname) of this machine and the port you are currently
-                    connected to (e.g., <code>127.0.0.1:26002</code>).
+                    Enable TLS if this page was opened over HTTPS; otherwise,
+                    configure a plain TCP connection.
                 </li>
-            </ul>
+            </ol>
             <p>
                 Lumen is an open-source alternative to IDA Pro's official Lumina
                 server, providing a local or self-hosted solution for sharing
