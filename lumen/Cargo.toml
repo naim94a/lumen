@@ -14,5 +14,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 clap = "4.5"
 tokio-native-tls = "0.3"
 native-tls = { version = "0.2" }
-warp = "0.3"
+warp = "0.4"
 prometheus-client = "0.22"
