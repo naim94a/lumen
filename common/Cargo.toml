@@ -28,7 +28,7 @@ diesel-async = { version = "0.9", optional = true, features = [
     "bb8",
 ] }
 anyhow = "1.0"
-prometheus-client = "0.22"
+prometheus-client = "0.25"
 
 [features]
 default = ["web", "db"]
